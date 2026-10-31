@@ -3,37 +3,46 @@ import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../features/auth/AuthContext';
 import { Button } from '../../components/ui/Button';
 import { useToast } from '../../hooks/useToast';
-import { apiRequest } from '../../lib/apiClient';
-import { ShieldCheck, Copy, Sparkles } from 'lucide-react';
+import { ShieldCheck, Copy, Sparkles, ArrowRight } from 'lucide-react';
+import { getDefaultPathForRole } from '../../routes/routeConfig';
 
 export default function VerifyOtpPage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { verifyOtp } = useAuth();
+  const { verifyOtp, resendOtp } = useAuth();
   const toast = useToast();
 
-  const [email, setEmail] = useState(location.state?.email || 'alexander@mercury-holdings.co');
+  const [email, setEmail] = useState(location.state?.email || '');
   const [digits, setDigits] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
-  const [devOtp, setDevOtp] = useState(location.state?.otp || null);
+  const [countdown, setCountdown] = useState(60);
+  const [serverError, setServerError] = useState('');
+  const [devOtp, setDevOtp] = useState(location.state?.devOtp || location.state?.otp || null);
   const inputRefs = useRef([]);
 
   useEffect(() => {
     inputRefs.current[0]?.focus();
-    if (location.state?.otp) {
-      setDevOtp(String(location.state.otp));
+    if (location.state?.devOtp || location.state?.otp) {
+      setDevOtp(String(location.state.devOtp || location.state.otp));
     }
   }, [location.state]);
 
+  // Countdown timer for resending OTP
+  useEffect(() => {
+    if (countdown <= 0) return;
+    const interval = setInterval(() => {
+      setCountdown((prev) => prev - 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [countdown]);
+
   const handleChange = (index, value) => {
-    // Only accept numbers
     const cleanVal = value.replace(/\D/g, '').slice(-1);
     const newDigits = [...digits];
     newDigits[index] = cleanVal;
     setDigits(newDigits);
 
-    // Auto-advance
     if (cleanVal && index < 5) {
       inputRefs.current[index + 1]?.focus();
     }
@@ -49,7 +58,6 @@ export default function VerifyOtpPage() {
     e.preventDefault();
     const paste = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
     if (!paste) return;
-
     fillOtp(paste);
   };
 
@@ -60,125 +68,143 @@ export default function VerifyOtpPage() {
       newDigits[i] = clean[i];
     }
     setDigits(newDigits);
-
-    const targetIdx = Math.min(clean.length, 5);
-    inputRefs.current[targetIdx]?.focus();
-  };
-
-  const handleResend = async () => {
-    setResending(true);
-    try {
-      const res = await apiRequest('/api/auth/resend-signup-otp', {
-        method: 'POST',
-        body: JSON.stringify({ email }),
-      });
-      if (res?.otp) {
-        setDevOtp(String(res.otp));
-      }
-      toast.success('A new OTP has been dispatched to your email.', 'Code Dispatched');
-    } catch (err) {
-      toast.error(err.message || 'Failed to resend code', 'Error');
-    } finally {
-      setResending(false);
-    }
+    const nextIdx = Math.min(clean.length, 5);
+    inputRefs.current[nextIdx]?.focus();
   };
 
   const handleSubmit = async (e) => {
-    e?.preventDefault();
-    const code = digits.join('');
-    if (code.length < 6) {
-      toast.warning('Please enter all 6 verification digits');
+    e.preventDefault();
+    setServerError('');
+    const otpCode = digits.join('');
+    if (otpCode.length !== 6) {
+      setServerError('Please enter all 6 digits of your security code.');
+      return;
+    }
+
+    if (!email) {
+      setServerError('Missing email address. Please return to signup.');
       return;
     }
 
     setLoading(true);
     try {
-      await verifyOtp(email, code);
-      toast.success('Identity verified successfully', 'Access Granted');
-      navigate('/dashboard');
+      const res = await verifyOtp(email, otpCode);
+      toast.success('Account verified successfully', 'Access granted');
+      const role = res?.user?.role || 'customer';
+      navigate(getDefaultPathForRole(role), { replace: true });
     } catch (err) {
-      toast.error(err.message || 'Invalid or expired OTP', 'Verification Failed');
+      setServerError(err.message || 'Invalid or expired OTP security code.');
     } finally {
       setLoading(false);
     }
   };
 
+  const handleResend = async () => {
+    if (countdown > 0) return;
+    if (!email) {
+      toast.warning('No email provided to dispatch code to.');
+      return;
+    }
+
+    setResending(true);
+    setServerError('');
+    try {
+      const res = await resendOtp(email);
+      if (res?.otp) {
+        setDevOtp(String(res.otp));
+      }
+      setCountdown(60);
+      toast.info('A fresh security code has been dispatched.');
+    } catch (err) {
+      setServerError(err.message || 'Failed to resend code.');
+    } finally {
+      setResending(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen flex flex-col justify-center items-center p-6 bg-[var(--color-canvas)]">
-      <div className="w-full max-w-sm space-y-8">
+    <div className="min-h-screen bg-[var(--color-canvas)] paper-texture flex items-center justify-center p-6 text-[var(--color-ink)]">
+      <div className="w-full max-w-md bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-8 space-y-6 shadow-sm">
+        {/* Header */}
         <div className="text-center space-y-2">
-          <div className="inline-flex w-10 h-10 rounded-xl bg-[#0D4A38] dark:bg-[#15805D] text-white items-center justify-center shadow-sm">
-            <ShieldCheck className="w-5 h-5" />
+          <div className="w-10 h-10 rounded-full bg-[var(--color-canvas)] border border-[var(--color-border)] text-[var(--color-accent)] flex items-center justify-center mx-auto">
+            <ShieldCheck className="w-5 h-5 stroke-[1.5]" />
           </div>
-          <h1 className="font-serif-display text-3xl font-medium tracking-tight text-[var(--color-ink)]">
-            Two-Factor Challenge
+          <h1 className="font-serif-display text-2xl font-normal tracking-tight">
+            Security Verification
           </h1>
           <p className="text-xs text-[var(--color-ink-muted)]">
-            Enter the 6-digit security code sent to <br />
-            <span className="font-num font-medium text-[var(--color-ink)]">{email}</span>
+            Enter the 6-digit confirmation code sent to{' '}
+            <span className="font-mono text-[var(--color-ink)] font-semibold">{email || 'your email'}</span>
           </p>
         </div>
 
-        {/* Development Helper Badge with 1-click Auto-Fill */}
+        {/* Development Helper Badge */}
         {devOtp && (
-          <div className="p-3 rounded-lg border border-[#0D4A38]/30 dark:border-[#15805D]/30 bg-[#0D4A38]/5 dark:bg-[#15805D]/10 text-xs flex items-center justify-between animate-in fade-in">
-            <div className="flex items-center gap-2 text-[var(--color-ink)]">
-              <Sparkles className="w-4 h-4 text-[#15805D] shrink-0" />
-              <span>
-                Dev Code: <strong className="font-num tracking-wider">{devOtp}</strong>
-              </span>
+          <div className="p-2.5 rounded-lg border border-[var(--color-accent-border)] bg-[var(--color-accent-tint)] flex items-center justify-between text-xs text-[var(--color-accent)]">
+            <div className="flex items-center gap-1.5 font-mono">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Dev Code: <strong className="tracking-widest">{devOtp}</strong></span>
             </div>
             <button
               type="button"
               onClick={() => fillOtp(devOtp)}
-              className="text-[#0D4A38] dark:text-[#1BA376] font-medium hover:underline text-[11px] flex items-center gap-1"
+              className="text-[11px] font-semibold underline hover:no-underline"
             >
-              <Copy className="w-3 h-3" /> Auto-fill
+              Auto-fill
             </button>
           </div>
         )}
 
-        <div className="p-6 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-xs space-y-6">
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="flex justify-between gap-2" onPaste={handlePaste}>
-              {digits.map((digit, idx) => (
-                <input
-                  key={idx}
-                  ref={(el) => (inputRefs.current[idx] = el)}
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={1}
-                  value={digit}
-                  onChange={(e) => handleChange(idx, e.target.value)}
-                  onKeyDown={(e) => handleKeyDown(idx, e)}
-                  className="w-11 h-12 text-center text-lg font-num font-semibold rounded-lg bg-[var(--color-canvas)] border border-[var(--color-border)] focus:border-[#0D4A38] dark:focus:border-[#15805D] focus:ring-1 focus:ring-[#0D4A38] focus:outline-none transition-colors"
-                />
-              ))}
-            </div>
-
-            <Button type="submit" loading={loading} className="w-full" size="lg">
-              Verify Code
-            </Button>
-          </form>
-
-          <div className="text-center text-xs text-[var(--color-ink-muted)] pt-2 space-y-2">
-            <p>
-              Didn't receive code?{' '}
-              <button
-                type="button"
-                disabled={resending}
-                onClick={handleResend}
-                className="text-[#0D4A38] dark:text-[#15805D] font-medium hover:underline disabled:opacity-50"
-              >
-                {resending ? 'Dispatching...' : 'Resend code'}
-              </button>
-            </p>
-            <div>
-              <Link to="/login" className="text-[var(--color-ink-faint)] hover:text-[var(--color-ink)]">
-                Back to sign in
-              </Link>
-            </div>
+        {serverError && (
+          <div className="p-3 rounded border border-[var(--color-accent-border)] bg-[var(--color-accent-tint)] text-xs text-[var(--color-accent)] font-medium">
+            {serverError}
           </div>
+        )}
+
+        {/* 6-box input */}
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="flex justify-center gap-2" onPaste={handlePaste}>
+            {digits.map((digit, idx) => (
+              <input
+                key={idx}
+                ref={(el) => (inputRefs.current[idx] = el)}
+                type="text"
+                inputMode="numeric"
+                maxLength={1}
+                value={digit}
+                onChange={(e) => handleChange(idx, e.target.value)}
+                onKeyDown={(e) => handleKeyDown(idx, e)}
+                className="w-11 h-13 text-center text-xl font-num font-semibold rounded-md border border-[var(--color-border)] bg-[var(--color-canvas)] focus:border-[var(--color-accent)] focus:bg-[var(--color-surface)] focus:outline-hidden transition-all text-[var(--color-ink)]"
+              />
+            ))}
+          </div>
+
+          <Button
+            type="submit"
+            variant="primary"
+            className="w-full"
+            loading={loading}
+            icon={ArrowRight}
+          >
+            Verify Security Code
+          </Button>
+        </form>
+
+        {/* Resend and Sign in options */}
+        <div className="pt-2 border-t border-[var(--color-border)] flex items-center justify-between text-xs text-[var(--color-ink-muted)]">
+          <button
+            type="button"
+            onClick={handleResend}
+            disabled={countdown > 0 || resending}
+            className="text-[var(--color-accent)] hover:underline disabled:opacity-50 disabled:no-underline"
+          >
+            {countdown > 0 ? `Resend code in ${countdown}s` : 'Resend code'}
+          </button>
+
+          <Link to="/login" className="hover:text-[var(--color-ink)] transition-colors">
+            Back to sign in
+          </Link>
         </div>
       </div>
     </div>

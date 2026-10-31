@@ -1,36 +1,58 @@
 import React, { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Drawer } from '../../components/ui/Drawer';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
 import { ResourcePicker } from '../../components/ui/ResourcePicker';
-import { MOCK_PLANS } from '../../lib/mocks';
+import { api } from '../../lib/apiClient';
 import { Plus, Trash2 } from 'lucide-react';
 import { useToast } from '../../hooks/useToast';
+import { MoneyText } from '../../components/ui/MoneyText';
 
 export function TemplateBuilderDrawer({ open, onClose, onSave, initialData }) {
   const [name, setName] = useState('');
-  const [planId, setPlanId] = useState(MOCK_PLANS[0]?._id || '');
+  const [planId, setPlanId] = useState('');
+  const [validityDays, setValidityDays] = useState(30);
   const [lines, setLines] = useState([
-    { product_variant_id: '672458a4e8d3570000000001', quantity: 10, unit_price: 120 },
+    { product_variant_id: '', quantity: 1, unit_price: 100 },
   ]);
   const [loading, setLoading] = useState(false);
   const toast = useToast();
 
+  const { data: plans = [] } = useQuery({
+    queryKey: ['plans-list'],
+    queryFn: async () => {
+      const res = await api.get('/api/plans');
+      return Array.isArray(res) ? res : res?.data || [];
+    },
+  });
+
   useEffect(() => {
     if (initialData) {
       setName(initialData.name || '');
-      setPlanId(initialData.plan_id?._id || initialData.plan_id || MOCK_PLANS[0]?._id);
-      setLines(initialData.lines?.length ? initialData.lines : [{ product_variant_id: '672458a4e8d3570000000001', quantity: 1, unit_price: 100 }]);
+      setPlanId(initialData.default_plan_id?._id || initialData.default_plan_id || initialData.plan_id?._id || initialData.plan_id || '');
+      setValidityDays(initialData.validity_days || 30);
+      const rawLines = initialData.template_lines || initialData.lines || [];
+      if (rawLines.length > 0) {
+        setLines(
+          rawLines.map((l) => ({
+            product_variant_id: l.product_variant_id?._id || l.product_variant_id || l.variant_id || '',
+            quantity: l.default_quantity || l.quantity || 1,
+            unit_price: l.unit_price || 100,
+          }))
+        );
+      }
     } else {
       setName('');
-      setPlanId(MOCK_PLANS[0]?._id || '');
-      setLines([{ product_variant_id: '672458a4e8d3570000000001', quantity: 5, unit_price: 120 }]);
+      setPlanId(plans[0]?._id || '');
+      setValidityDays(30);
+      setLines([{ product_variant_id: '', quantity: 1, unit_price: 100 }]);
     }
-  }, [initialData, open]);
+  }, [initialData, open, plans]);
 
   const handleAddLine = () => {
-    setLines([...lines, { product_variant_id: '672458a4e8d3570000000002', quantity: 1, unit_price: 450 }]);
+    setLines([...lines, { product_variant_id: '', quantity: 1, unit_price: 100 }]);
   };
 
   const handleRemoveLine = (idx) => {
@@ -46,20 +68,35 @@ export function TemplateBuilderDrawer({ open, onClose, onSave, initialData }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!name.trim()) {
+      toast.warning('Template name is required');
+      return;
+    }
+    const targetPlan = planId || plans[0]?._id;
+    if (!targetPlan) {
+      toast.warning('Please select a default plan configuration');
+      return;
+    }
+
     setLoading(true);
     try {
       const payload = {
-        name,
-        plan_id: planId,
+        name: name.trim(),
+        default_plan_id: targetPlan,
+        validity_days: Number(validityDays) || 30,
+        template_lines: lines.map((l) => ({
+          product_variant_id: l.product_variant_id || undefined,
+          default_quantity: Number(l.quantity) || 1,
+        })),
         lines: lines.map((l) => ({
-          product_variant_id: l.product_variant_id?._id || l.product_variant_id,
-          quantity: Number(l.quantity),
-          unit_price: Number(l.unit_price),
+          product_variant_id: l.product_variant_id || undefined,
+          quantity: Number(l.quantity) || 1,
+          unit_price: Number(l.unit_price) || 0,
         })),
       };
 
-      await onSave(payload, initialData?._id);
-      toast.success(initialData ? 'Template updated' : 'Quotation template saved');
+      await onSave(payload);
+      toast.success(initialData ? 'Quotation template updated' : 'Quotation template created');
       onClose();
     } catch (err) {
       toast.error(err.message || 'Failed to save template', 'Error');
@@ -74,37 +111,47 @@ export function TemplateBuilderDrawer({ open, onClose, onSave, initialData }) {
     <Drawer
       open={open}
       onClose={onClose}
-      title={initialData ? 'Edit Quotation Template' : 'Create Quotation Template'}
-      description="Preconfigure line items and plans to quickly issue standard quotes."
+      title={initialData ? 'Edit Quotation Template' : 'New Quotation Template'}
+      description="Define standardized packages and contract lines for instant customer proposal generation."
       width="max-w-lg"
     >
       <form onSubmit={handleSubmit} className="space-y-6">
         <Input
           label="Template Name"
-          type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
+          placeholder="e.g. Enterprise Foundation Tier"
           required
-          placeholder="e.g. Standard Enterprise Bundle"
         />
 
-        <Select
-          label="Linked Plan"
-          value={planId}
-          onChange={(e) => setPlanId(e.target.value)}
-        >
-          {MOCK_PLANS.map((plan) => (
-            <option key={plan._id} value={plan._id}>
-              {plan.name} ({plan.billing_frequency})
-            </option>
-          ))}
-        </Select>
+        <div className="grid grid-cols-2 gap-4">
+          <Select
+            label="Default Plan"
+            value={planId || (plans[0]?._id || '')}
+            onChange={(e) => setPlanId(e.target.value)}
+          >
+            {plans.map((p) => (
+              <option key={p._id} value={p._id}>
+                {p.name} ({p.billing_frequency})
+              </option>
+            ))}
+          </Select>
 
-        {/* Line Items */}
+          <Input
+            label="Validity (Days)"
+            type="number"
+            min="1"
+            value={validityDays}
+            onChange={(e) => setValidityDays(e.target.value)}
+            required
+          />
+        </div>
+
+        {/* Lines Builder */}
         <div className="space-y-3 pt-2 border-t border-[var(--color-border)]">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase text-[var(--color-ink-muted)]">
-              Preconfigured Line Items
+            <span className="text-xs font-semibold uppercase font-mono tracking-wider text-[var(--color-ink-muted)]">
+              Bundled Product Lines
             </span>
             <Button
               type="button"
@@ -113,7 +160,7 @@ export function TemplateBuilderDrawer({ open, onClose, onSave, initialData }) {
               onClick={handleAddLine}
               icon={Plus}
             >
-              Add Line
+              Add Item
             </Button>
           </div>
 
@@ -121,63 +168,68 @@ export function TemplateBuilderDrawer({ open, onClose, onSave, initialData }) {
             {lines.map((line, idx) => (
               <div
                 key={idx}
-                className="p-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-canvas)] space-y-2 relative"
+                className="p-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-canvas)] space-y-3"
               >
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-medium text-[var(--color-ink-muted)]">
-                    Item #{idx + 1}
-                  </span>
-                  {lines.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveLine(idx)}
-                      className="text-[var(--color-ink-faint)] hover:text-[#B91C1C] transition-colors"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-
                 <ResourcePicker
                   type="variant"
-                  value={line.product_variant_id?._id || line.product_variant_id}
+                  value={line.product_variant_id}
                   onChange={(val) => handleLineChange(idx, 'product_variant_id', val)}
+                  label={`Line #${idx + 1} Variant`}
                 />
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-3 items-end">
                   <Input
-                    label="Default Quantity"
+                    label="Default Qty"
                     type="number"
                     min="1"
                     value={line.quantity}
                     onChange={(e) => handleLineChange(idx, 'quantity', e.target.value)}
+                    required
                   />
+
                   <Input
-                    label="Default Unit Price ($)"
+                    label="Unit Price"
                     type="number"
-                    min="0"
                     step="0.01"
+                    min="0"
                     value={line.unit_price}
                     onChange={(e) => handleLineChange(idx, 'unit_price', e.target.value)}
+                    required
                   />
+
+                  <div className="flex items-center justify-between pb-1.5">
+                    <div className="text-xs">
+                      <span className="text-[var(--color-ink-muted)] block text-[10px]">Est. Subtotal</span>
+                      <MoneyText amount={line.quantity * line.unit_price} className="font-semibold" />
+                    </div>
+                    {lines.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveLine(idx)}
+                        className="text-[var(--color-ink-muted)] hover:text-[var(--color-accent)] p-1 rounded"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
           </div>
-
-          <div className="flex justify-between items-center p-3 rounded-lg bg-[var(--color-canvas-subtle)] border border-[var(--color-border)] text-xs font-medium">
-            <span>Template Preset Value:</span>
-            <span className="font-num text-sm text-[var(--color-ink)] font-semibold">
-              ${estimatedTotal.toFixed(2)}
-            </span>
-          </div>
         </div>
 
-        <div className="flex items-center justify-end gap-2 pt-4 border-t border-[var(--color-border)]">
-          <Button type="button" variant="ghost" onClick={onClose}>
+        <div className="p-4 rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] flex items-center justify-between">
+          <span className="text-xs uppercase font-mono text-[var(--color-ink-muted)]">
+            Estimated Template Value
+          </span>
+          <MoneyText amount={estimatedTotal} className="text-lg font-serif-display text-[var(--color-ink)]" />
+        </div>
+
+        <div className="flex justify-end gap-3 pt-4 border-t border-[var(--color-border)]">
+          <Button variant="ghost" onClick={onClose} type="button">
             Cancel
           </Button>
-          <Button type="submit" loading={loading}>
+          <Button variant="primary" type="submit" loading={loading}>
             Save Template
           </Button>
         </div>
@@ -185,4 +237,3 @@ export function TemplateBuilderDrawer({ open, onClose, onSave, initialData }) {
     </Drawer>
   );
 }
-

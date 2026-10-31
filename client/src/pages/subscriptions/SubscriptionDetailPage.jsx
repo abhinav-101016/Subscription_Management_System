@@ -1,118 +1,121 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
   Calendar,
   CheckCircle2,
-  AlertCircle,
-  XCircle,
+  AlertTriangle,
   Clock,
-  Play,
   FileText,
-  User,
-  ShieldCheck,
-  RefreshCw,
+  CreditCard,
+  Copy,
+  Check,
+  ExternalLink,
 } from 'lucide-react';
-import { apiRequest } from '../../lib/apiClient';
+import { api } from '../../lib/apiClient';
 import { Button } from '../../components/ui/Button';
 import { StatusPill } from '../../components/ui/StatusPill';
-import { Stepper } from '../../components/ui/Stepper';
 import { MoneyText } from '../../components/ui/MoneyText';
-import { DateText } from '../../components/ui/DateText';
 import { Skeleton } from '../../components/ui/Skeleton';
-import { truncateId } from '../../lib/utils';
+import { cn, formatDate, formatCurrency } from '../../lib/utils';
 import { useToast } from '../../hooks/useToast';
 
 export default function SubscriptionDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
+  const queryClient = useQueryClient();
 
-  const [subscription, setSubscription] = useState(null);
-  const [invoices, setInvoices] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [transitioning, setTransitioning] = useState(false);
+  const [activeTab, setActiveTab] = useState('lines'); // 'lines' | 'invoices'
   const [violationError, setViolationError] = useState(null);
+  const [copied, setCopied] = useState(false);
 
-  const fetchDetails = async () => {
-    setLoading(true);
-    setViolationError(null);
-    try {
-      const [subData, allInvoices] = await Promise.all([
-        apiRequest(`/api/subscriptions/${id}`),
-        apiRequest('/api/invoices'),
-      ]);
+  // 1. Fetch Subscription
+  const {
+    data: subscription,
+    isLoading: loadingSub,
+    error: subError,
+  } = useQuery({
+    queryKey: ['subscription-detail', id],
+    queryFn: async () => {
+      const res = await api.get(`/api/subscriptions/${id}`);
+      return res?.data || res;
+    },
+  });
 
-      setSubscription(subData);
-      // Filter invoices linked to this subscription
-      const linked = (allInvoices || []).filter(
-        (inv) => inv.subscription_id?._id === id || inv.subscription_id === id
-      );
-      setInvoices(linked);
-    } catch (err) {
-      toast.error('Failed to load subscription details', 'Error');
-    } finally {
-      setLoading(false);
-    }
-  };
+  // 2. Fetch Linked Invoices
+  const { data: linkedInvoices = [], isLoading: loadingInvoices } = useQuery({
+    queryKey: ['subscription-invoices', id],
+    queryFn: async () => {
+      const res = await api.get(`/api/invoices?subscription_id=${id}`);
+      return Array.isArray(res) ? res : res?.data || [];
+    },
+    enabled: !!id,
+  });
 
-  useEffect(() => {
-    fetchDetails();
-  }, [id]);
-
-  // Transition status using state machine PATCH endpoint
-  const handleTransition = async (nextStatus) => {
-    setTransitioning(true);
-    setViolationError(null);
-    try {
-      const updated = await apiRequest(`/api/subscriptions/${id}/status`, {
-        method: 'PATCH',
-        body: JSON.stringify({ status: nextStatus }),
+  // State Transition Mutation
+  const transitionMutation = useMutation({
+    mutationFn: async (targetStatus) => {
+      return await api.patch(`/api/subscriptions/${id}/status`, { status: targetStatus });
+    },
+    onSuccess: (updated) => {
+      setViolationError(null);
+      queryClient.setQueryData(['subscription-detail', id], updated?.data || updated);
+      queryClient.invalidateQueries({ queryKey: ['subscriptions-list'] });
+      toast.success(`Contract status progressed to ${updated?.status || 'updated state'}`);
+    },
+    onError: (err) => {
+      // Detailed inline State Machine Violation error display
+      setViolationError({
+        message: err.message,
+        allowed: err.allowed_transitions || [],
+        requested: err.requested_status,
+        current: err.current_status,
       });
-      setSubscription(updated);
-      toast.success(`Subscription transitioned to ${nextStatus}`, 'State Updated');
-    } catch (err) {
-      // Check for structured state machine violation
-      if (err.isStateMachineViolation || err.serverData?.error === 'State Machine Violation') {
-        setViolationError({
-          current_status: err.current_status || subscription.status,
-          requested_status: err.requested_status || nextStatus,
-          allowed_transitions: err.allowed_transitions || [],
-          message: err.message,
-        });
-      } else {
-        toast.error(err.message || 'Status transition failed', 'Error');
-      }
-    } finally {
-      setTransitioning(false);
-    }
+    },
+  });
+
+  const handleCopyId = () => {
+    if (!subscription?._id) return;
+    navigator.clipboard.writeText(subscription._id);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
   };
 
-  if (loading) {
+  if (loadingSub) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-24 w-full" />
-        <Skeleton className="h-64 w-full" />
+        <Skeleton className="h-16 w-full" />
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          <Skeleton className="lg:col-span-8 h-96" />
+          <Skeleton className="lg:col-span-4 h-96" />
+        </div>
       </div>
     );
   }
 
-  if (!subscription) {
+  if (subError || !subscription) {
     return (
-      <div className="text-center py-16 space-y-3">
-        <p className="text-sm text-[var(--color-ink-muted)]">Subscription record not found.</p>
-        <Button variant="secondary" onClick={() => navigate('/subscriptions')}>
-          Back to Subscriptions
+      <div className="p-12 text-center space-y-4 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl">
+        <p className="text-sm text-[var(--color-ink-muted)]">
+          {subError?.message || 'Subscription contract could not be retrieved from the ledger.'}
+        </p>
+        <Button variant="secondary" onClick={() => navigate('/app/subscriptions')}>
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Return to Subscriptions
         </Button>
       </div>
     );
   }
 
   const steps = ['Draft', 'Quotation', 'Confirmed', 'Active', 'Closed'];
+  const currentStatus = subscription.status || 'Draft';
+  const currentIndex = steps.indexOf(currentStatus);
 
-  // State-machine allowed transitions mapping
-  const allowedTransitionsMap = {
+  // Business state machine transition rules
+  const transitionsMap = {
     Draft: ['Quotation'],
     Quotation: ['Confirmed', 'Closed'],
     Confirmed: ['Active'],
@@ -120,308 +123,320 @@ export default function SubscriptionDetailPage() {
     Closed: [],
   };
 
-  const allowedNext = allowedTransitionsMap[subscription.status] || [];
-  const lines = subscription.lines || [];
-  const cycleSubtotal = lines.reduce(
-    (acc, l) => acc + (l.quantity || 1) * (l.unit_price || 0),
+  const allowedNext = transitionsMap[currentStatus] || [];
+  const primaryNext = allowedNext[0]; // Next forward action
+
+  const totalContractValue = (subscription.lines || []).reduce(
+    (acc, l) => acc + (l.total_amount ?? l.quantity * l.unit_price),
     0
   );
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-200">
-      {/* Top Navigation & ID Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-[var(--color-border)]">
-        <div className="flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => navigate('/subscriptions')}
-            title="Back to list"
+    <div className="space-y-8 text-[var(--color-ink)]">
+      {/* Top Bar with Navigation & Actions */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[var(--color-border)]">
+        <div className="space-y-1">
+          <Link
+            to="/app/subscriptions"
+            className="inline-flex items-center gap-1.5 text-xs text-[var(--color-ink-muted)] hover:text-[var(--color-ink)] transition-colors"
           >
-            <ArrowLeft className="w-4 h-4" />
-          </Button>
-
-          <div>
-            <div className="flex items-center gap-2.5">
-              <h1 className="font-serif-display text-2xl font-medium tracking-tight text-[var(--color-ink)]">
-                Subscription {truncateId(subscription._id, 8, 4)}
-              </h1>
-              <StatusPill status={subscription.status} />
-            </div>
-            <p className="text-xs text-[var(--color-ink-muted)] mt-0.5">
-              Created on <DateText date={subscription.createdAt || subscription.start_date} />
-            </p>
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>All Contracts</span>
+          </Link>
+          <div className="flex items-center gap-3">
+            <h1 className="font-serif-display text-3xl font-normal tracking-tight text-[var(--color-ink)]">
+              {subscription.subscription_number || 'SUB-CONTRACT'}
+            </h1>
+            <StatusPill status={currentStatus} />
+          </div>
+          <div className="flex items-center gap-2 text-[10px] font-mono text-[var(--color-ink-faint)]">
+            <span>ID: {subscription._id}</span>
+            <button onClick={handleCopyId} className="hover:text-[var(--color-ink)]">
+              {copied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+            </button>
           </div>
         </div>
 
-        {/* Transition Action Buttons */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {allowedNext.map((targetStatus) => {
-            const isDanger = targetStatus === 'Closed';
-            return (
-              <Button
-                key={targetStatus}
-                variant={isDanger ? 'danger' : 'primary'}
-                size="sm"
-                loading={transitioning}
-                onClick={() => handleTransition(targetStatus)}
-              >
-                {targetStatus === 'Quotation' && 'Submit Quotation'}
-                {targetStatus === 'Confirmed' && 'Accept & Confirm'}
-                {targetStatus === 'Active' && 'Activate Contract'}
-                {targetStatus === 'Closed' && 'Close / Terminate'}
-              </Button>
-            );
-          })}
-
-          {allowedNext.length === 0 && (
-            <span className="text-xs font-num text-[var(--color-ink-faint)] italic">
-              Terminal state reached
-            </span>
+        {/* Primary Allowed State Machine Action */}
+        <div className="flex items-center gap-2">
+          {primaryNext && (
+            <Button
+              variant="primary"
+              loading={transitionMutation.isPending}
+              onClick={() => transitionMutation.mutate(primaryNext)}
+            >
+              Advance to {primaryNext}
+            </Button>
+          )}
+          {allowedNext.includes('Closed') && currentStatus !== 'Active' && (
+            <Button
+              variant="secondary"
+              loading={transitionMutation.isPending}
+              onClick={() => transitionMutation.mutate('Closed')}
+            >
+              Reject / Close
+            </Button>
           )}
         </div>
       </div>
 
       {/* State Machine Violation Error Banner */}
       {violationError && (
-        <div className="p-4 rounded-xl border border-[#B91C1C]/40 bg-rose-500/10 text-xs space-y-2">
-          <div className="flex items-center gap-2 font-semibold text-[#B91C1C]">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>State Machine Violation</span>
+        <div className="p-4 rounded-lg border border-[var(--color-accent-border)] bg-[var(--color-accent-tint)] space-y-2 text-xs text-[var(--color-accent)]">
+          <div className="flex items-center gap-2 font-semibold">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>State Machine Violation: {violationError.message}</span>
           </div>
-          <p className="text-[var(--color-ink)]">
-            Illegal transition from <span className="font-semibold">{violationError.current_status}</span> to{' '}
-            <span className="font-semibold">{violationError.requested_status}</span>.
-          </p>
-          {violationError.allowed_transitions.length > 0 ? (
-            <p className="text-[var(--color-ink-muted)]">
-              Allowed transitions from current state:{' '}
-              <span className="font-medium text-[var(--color-ink)]">
-                {violationError.allowed_transitions.join(', ')}
-              </span>
-            </p>
-          ) : (
-            <p className="text-[var(--color-ink-muted)]">
-              This contract is in a terminal state and cannot transition further.
+          {violationError.allowed && violationError.allowed.length > 0 && (
+            <p className="font-mono text-[11px]">
+              Permitted transitions from '{currentStatus}':{' '}
+              <strong>{violationError.allowed.join(', ')}</strong>
             </p>
           )}
         </div>
       )}
 
-      {/* Stepper Card */}
-      <div className="p-6 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] space-y-4">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-faint)]">
-            Lifecycle State Machine
-          </span>
-          <span className="text-xs text-[var(--color-ink-muted)]">
-            Current status:{' '}
-            <span className="font-medium text-[var(--color-ink)] capitalize">
-              {subscription.status}
-            </span>
-          </span>
-        </div>
-
-        <Stepper
-          steps={steps}
-          currentStep={subscription.status}
-          allowedTransitions={allowedNext}
-          onTransition={handleTransition}
-          disabled={transitioning}
-        />
-      </div>
-
-      {/* Metadata Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Customer Account */}
-        <div className="p-5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] space-y-3">
-          <div className="flex items-center gap-2 text-xs font-semibold text-[var(--color-ink-muted)] uppercase">
-            <User className="w-3.5 h-3.5" />
-            <span>Customer Account</span>
-          </div>
-          <div>
-            <div className="font-medium text-sm text-[var(--color-ink)]">
-              {subscription.customer_id?.name || 'Enterprise Customer'}
-            </div>
-            <div className="text-xs text-[var(--color-ink-muted)] mt-0.5">
-              {subscription.customer_id?.email || '—'}
-            </div>
-            <div className="text-xs text-[var(--color-ink-faint)] font-num mt-1">
-              ID: {truncateId(subscription.customer_id?._id || subscription.customer_id, 10, 6)}
-            </div>
-          </div>
-        </div>
-
-        {/* Plan Configuration */}
-        <div className="p-5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] space-y-3">
-          <div className="flex items-center gap-2 text-xs font-semibold text-[var(--color-ink-muted)] uppercase">
-            <Calendar className="w-3.5 h-3.5" />
-            <span>Plan Configuration</span>
-          </div>
-          <div>
-            <div className="font-medium text-sm text-[var(--color-ink)]">
-              {subscription.plan_id?.name || 'Standard Recurring Plan'}
-            </div>
-            <div className="text-xs text-[var(--color-ink-muted)] mt-0.5">
-              Frequency: {subscription.plan_id?.billing_frequency || 'Monthly'}
-            </div>
-            <div className="text-xs text-[var(--color-ink-faint)] font-num mt-1">
-              Renewal: {subscription.plan_id?.renewal_behavior || 'Renew'}
-            </div>
-          </div>
-        </div>
-
-        {/* Billing Schedule */}
-        <div className="p-5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] space-y-3">
-          <div className="flex items-center gap-2 text-xs font-semibold text-[var(--color-ink-muted)] uppercase">
-            <Clock className="w-3.5 h-3.5" />
-            <span>Billing Cycle</span>
-          </div>
-          <div>
-            <div className="flex justify-between text-xs text-[var(--color-ink-muted)]">
-              <span>Next Billing Date:</span>
-              <DateText date={subscription.next_billing_date} className="font-semibold text-[var(--color-ink)]" />
-            </div>
-            <div className="flex justify-between text-xs text-[var(--color-ink-muted)] mt-1.5">
-              <span>Contract Started:</span>
-              <DateText date={subscription.start_date} />
-            </div>
-            <div className="flex justify-between text-xs text-[var(--color-ink-muted)] mt-1.5">
-              <span>Cycle Value:</span>
-              <MoneyText amount={cycleSubtotal} className="font-semibold text-[var(--color-ink)]" />
-            </div>
-          </div>
+      {/* Horizontal Lifecycle Stepper Timeline */}
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-6 shadow-2xs">
+        <span className="text-[10px] uppercase font-mono tracking-wider text-[var(--color-ink-muted)] block mb-4">
+          Lifecycle Progression
+        </span>
+        <div className="flex items-center justify-between relative">
+          <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-0.5 bg-[var(--color-border)] z-0" />
+          {steps.map((st, idx) => {
+            const isCompleted = currentIndex > idx;
+            const isCurrent = currentIndex === idx;
+            return (
+              <div key={st} className="flex flex-col items-center relative z-10 bg-[var(--color-surface)] px-2">
+                <div
+                  className={cn(
+                    'w-6 h-6 rounded-full flex items-center justify-center text-xs font-mono transition-all',
+                    isCurrent
+                      ? 'bg-[var(--color-accent)] text-[var(--color-accent-text)] ring-4 ring-[var(--color-accent-tint)] font-bold'
+                      : isCompleted
+                      ? 'bg-[var(--color-ink)] text-[var(--color-canvas)] font-medium'
+                      : 'border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-ink-faint)]'
+                  )}
+                >
+                  {isCompleted ? '✓' : idx + 1}
+                </div>
+                <span
+                  className={cn(
+                    'text-[11px] font-mono mt-2',
+                    isCurrent
+                      ? 'text-[var(--color-accent)] font-semibold'
+                      : isCompleted
+                      ? 'text-[var(--color-ink)]'
+                      : 'text-[var(--color-ink-faint)]'
+                  )}
+                >
+                  {st}
+                </span>
+              </div>
+            );
+          })}
         </div>
       </div>
 
-      {/* Contract Line Items Table */}
-      <div className="p-6 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] space-y-4">
-        <h3 className="text-sm font-semibold text-[var(--color-ink)]">
-          Contract Line Items
-        </h3>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="border-b border-[var(--color-border)] text-[var(--color-ink-muted)] bg-[var(--color-canvas-subtle)]/50">
-                <th className="py-2.5 px-3 font-medium">Product Line / SKU</th>
-                <th className="py-2.5 px-3 font-medium text-right">Quantity</th>
-                <th className="py-2.5 px-3 font-medium text-right">Unit Price</th>
-                <th className="py-2.5 px-3 font-medium text-right">Extended Total</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[var(--color-border)]">
-              {lines.map((line, idx) => {
-                const total = (line.quantity || 1) * (line.unit_price || 0);
-                return (
-                  <tr key={idx} className="hover:bg-[var(--color-surface-hover)]">
-                    <td className="py-3 px-3">
-                      <div className="font-medium text-[var(--color-ink)]">
-                        {line.product_variant_id?.name || 'Enterprise Service Tier'}
-                      </div>
-                      <div className="text-[11px] text-[var(--color-ink-faint)] font-num">
-                        {line.product_variant_id?.sku || `SKU-ITEM-${idx + 1}`}
-                      </div>
-                    </td>
-                    <td className="py-3 px-3 text-right font-num">
-                      {line.quantity || 1}
-                    </td>
-                    <td className="py-3 px-3 text-right">
-                      <MoneyText amount={line.unit_price || 0} />
-                    </td>
-                    <td className="py-3 px-3 text-right font-semibold">
-                      <MoneyText amount={total} />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-            <tfoot>
-              <tr className="border-t border-[var(--color-border)] bg-[var(--color-canvas-subtle)]/30 font-semibold text-xs">
-                <td colSpan={3} className="py-3 px-3 text-right">
-                  Cycle Subtotal:
-                </td>
-                <td className="py-3 px-3 text-right font-num text-sm text-[var(--color-ink)]">
-                  <MoneyText amount={cycleSubtotal} />
-                </td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      </div>
-
-      {/* Linked Invoices Section */}
-      <div className="p-6 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-semibold text-[var(--color-ink)]">
-              Associated Invoices
-            </h3>
-            <p className="text-xs text-[var(--color-ink-muted)] mt-0.5">
-              Historical billing statements generated for this subscription.
-            </p>
-          </div>
-
-          {subscription.status === 'Active' && (
-            <Button
-              variant="secondary"
-              size="xs"
-              onClick={() => navigate('/billing-console')}
-              icon={RefreshCw}
+      {/* Two-Column Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        {/* Left Column (8 cols): Line Items & Billing Schedule */}
+        <div className="lg:col-span-8 space-y-8">
+          {/* Tabs for Contract Details vs Linked Invoices */}
+          <div className="border-b border-[var(--color-border)] flex gap-6 text-xs font-mono">
+            <button
+              onClick={() => setActiveTab('lines')}
+              className={cn(
+                'pb-2.5 transition-colors border-b-2',
+                activeTab === 'lines'
+                  ? 'border-[var(--color-accent)] text-[var(--color-ink)] font-semibold'
+                  : 'border-transparent text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]'
+              )}
             >
-              Billing Engine Console
-            </Button>
+              Contract Lines & Pricing ({subscription.lines?.length || 0})
+            </button>
+            <button
+              onClick={() => setActiveTab('invoices')}
+              className={cn(
+                'pb-2.5 transition-colors border-b-2',
+                activeTab === 'invoices'
+                  ? 'border-[var(--color-accent)] text-[var(--color-ink)] font-semibold'
+                  : 'border-transparent text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]'
+              )}
+            >
+              Linked Billed Invoices ({linkedInvoices.length})
+            </button>
+          </div>
+
+          {activeTab === 'lines' ? (
+            <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl overflow-hidden shadow-2xs">
+              <div className="p-4 px-6 border-b border-[var(--color-border)]">
+                <h3 className="font-serif-display text-base font-semibold">
+                  Contract Line Schedule
+                </h3>
+                <p className="text-[11px] text-[var(--color-ink-muted)] font-mono">
+                  Items evaluated during each recurring billing cycle
+                </p>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-[var(--color-canvas)] border-b border-[var(--color-border)] font-mono uppercase text-[10px] text-[var(--color-ink-muted)]">
+                    <tr>
+                      <th className="py-2.5 px-6">Variant / SKU</th>
+                      <th className="py-2.5 px-4 text-right">Quantity</th>
+                      <th className="py-2.5 px-4 text-right">Unit Price</th>
+                      <th className="py-2.5 px-4 text-right">Tax Amount</th>
+                      <th className="py-2.5 px-6 text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--color-border)] font-num">
+                    {(subscription.lines || []).map((line, idx) => (
+                      <tr key={idx} className="hover:bg-[var(--color-surface-hover)] transition-colors">
+                        <td className="py-3 px-6 font-ui">
+                          <span className="font-medium text-[var(--color-ink)]">
+                            {line.variant_id?.variant_name || line.variant_id?.attribute_value || 'Seat License'}
+                          </span>
+                          <span className="text-[10px] font-mono text-[var(--color-ink-faint)] block">
+                            SKU: {line.variant_id?.sku || 'SKU-STD'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right">{line.quantity}</td>
+                        <td className="py-3 px-4 text-right">{formatCurrency(line.unit_price)}</td>
+                        <td className="py-3 px-4 text-right text-[var(--color-ink-muted)]">
+                          {formatCurrency(line.tax_amount || 0)}
+                        </td>
+                        <td className="py-3 px-6 text-right font-semibold text-[var(--color-ink)]">
+                          {formatCurrency(line.total_amount ?? line.quantity * line.unit_price)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="p-4 px-6 bg-[var(--color-canvas)] border-t border-[var(--color-border)] flex justify-between items-center text-xs">
+                <span className="font-mono uppercase text-[10px] text-[var(--color-ink-muted)]">
+                  Total Contract Valuation
+                </span>
+                <MoneyText amount={totalContractValue} className="font-serif-display text-lg font-bold" />
+              </div>
+            </div>
+          ) : (
+            <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl overflow-hidden shadow-2xs">
+              {linkedInvoices.length === 0 ? (
+                <div className="p-12 text-center text-xs text-[var(--color-ink-muted)]">
+                  No invoices generated yet for this subscription. Invoices generate on active billing runs.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-[var(--color-canvas)] border-b border-[var(--color-border)] font-mono uppercase text-[10px] text-[var(--color-ink-muted)]">
+                      <tr>
+                        <th className="py-2.5 px-6">Invoice #</th>
+                        <th className="py-2.5 px-4">Period</th>
+                        <th className="py-2.5 px-4">Status</th>
+                        <th className="py-2.5 px-4 text-right">Grand Total</th>
+                        <th className="py-2.5 px-4 text-right">Amount Due</th>
+                        <th className="py-2.5 px-6 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--color-border)]">
+                      {linkedInvoices.map((inv) => (
+                        <tr key={inv._id} className="hover:bg-[var(--color-surface-hover)]">
+                          <td className="py-3 px-6 font-mono font-medium text-[var(--color-ink)]">
+                            {inv.invoice_number}
+                          </td>
+                          <td className="py-3 px-4 text-[11px] font-mono text-[var(--color-ink-muted)]">
+                            {formatDate(inv.billing_period_start, 'short')} – {formatDate(inv.billing_period_end, 'short')}
+                          </td>
+                          <td className="py-3 px-4">
+                            <StatusPill status={inv.status} />
+                          </td>
+                          <td className="py-3 px-4 text-right font-num">
+                            <MoneyText amount={inv.grand_total} />
+                          </td>
+                          <td className="py-3 px-4 text-right font-num font-semibold text-[var(--color-accent)]">
+                            <MoneyText amount={inv.amount_due ?? inv.grand_total} />
+                          </td>
+                          <td className="py-3 px-6 text-right">
+                            <Link
+                              to={`/app/invoices/${inv._id}`}
+                              className="text-xs text-[var(--color-accent)] hover:underline inline-flex items-center gap-1 font-medium"
+                            >
+                              Inspect <ExternalLink className="w-3 h-3" />
+                            </Link>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           )}
         </div>
 
-        {invoices.length === 0 ? (
-          <div className="py-8 text-center text-xs text-[var(--color-ink-muted)] border border-dashed border-[var(--color-border)] rounded-lg">
-            No invoices have been billed against this subscription yet.
-          </div>
-        ) : (
-          <div className="divide-y divide-[var(--color-border)] border border-[var(--color-border)] rounded-lg overflow-hidden">
-            {invoices.map((inv) => (
-              <div
-                key={inv._id}
-                onClick={() => navigate(`/invoices/${inv._id}`)}
-                className="p-3.5 flex items-center justify-between hover:bg-[var(--color-surface-hover)] cursor-pointer transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <FileText className="w-4 h-4 text-[var(--color-ink-muted)] shrink-0" />
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-num font-semibold text-xs text-[var(--color-ink)]">
-                        {inv.invoice_number}
-                      </span>
-                      <StatusPill status={inv.status} />
-                    </div>
-                    <div className="text-[11px] text-[var(--color-ink-faint)] mt-0.5">
-                      Issued <DateText date={inv.issue_date || inv.createdAt} /> • Due{' '}
-                      <DateText date={inv.due_date} />
-                    </div>
-                  </div>
-                </div>
+        {/* Right Sticky Summary Rail (4 cols) */}
+        <div className="lg:col-span-4 space-y-6 sticky top-6">
+          <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-6 space-y-6 shadow-2xs">
+            <h3 className="font-serif-display text-base font-semibold border-b border-[var(--color-border)] pb-3">
+              Contract Metadata
+            </h3>
 
-                <div className="text-right">
-                  <div className="text-xs font-semibold text-[var(--color-ink)]">
-                    <MoneyText amount={inv.grand_total} />
-                  </div>
-                  {inv.amount_due > 0 ? (
-                    <div className="text-[11px] font-medium text-[#B91C1C]">
-                      <MoneyText amount={inv.amount_due} /> due
-                    </div>
-                  ) : (
-                    <div className="text-[11px] font-medium text-[#15805D]">
-                      Fully Paid
-                    </div>
-                  )}
-                </div>
+            {/* Customer Account */}
+            <div className="space-y-1">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--color-ink-muted)]">
+                Customer Account
+              </span>
+              <p className="text-xs font-semibold text-[var(--color-ink)]">
+                {subscription.customer_id?.name || 'Customer'}
+              </p>
+              <p className="text-[11px] font-mono text-[var(--color-ink-muted)] truncate">
+                {subscription.customer_id?.email || '—'}
+              </p>
+              {subscription.customer_id?.phone && (
+                <p className="text-[11px] font-mono text-[var(--color-ink-faint)]">
+                  {subscription.customer_id.phone}
+                </p>
+              )}
+            </div>
+
+            {/* Plan Configuration */}
+            <div className="space-y-1">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--color-ink-muted)]">
+                Plan Configuration
+              </span>
+              <p className="text-xs font-semibold text-[var(--color-ink)]">
+                {subscription.plan_id?.name || 'Standard Tier'}
+              </p>
+              <div className="flex items-center gap-2 text-[11px] font-mono text-[var(--color-ink-muted)]">
+                <span>Frequency: {subscription.plan_id?.billing_frequency || 'Monthly'}</span>
+                <span>•</span>
+                <span>Behavior: {subscription.plan_id?.renewal_behavior || 'Renew'}</span>
               </div>
-            ))}
+            </div>
+
+            {/* Dates & Schedule */}
+            <div className="space-y-2 pt-2 border-t border-[var(--color-border)] text-xs">
+              <div className="flex justify-between">
+                <span className="text-[var(--color-ink-muted)]">Start Date:</span>
+                <span className="font-mono">{formatDate(subscription.start_date)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[var(--color-ink-muted)]">Payment Terms:</span>
+                <span className="font-mono">{subscription.payment_terms || 'Net 30'}</span>
+              </div>
+              {subscription.next_billing_date && (
+                <div className="flex justify-between font-semibold text-[var(--color-accent)]">
+                  <span>Next Billing Trigger:</span>
+                  <span className="font-mono">{formatDate(subscription.next_billing_date)}</span>
+                </div>
+              )}
+            </div>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
 }
-

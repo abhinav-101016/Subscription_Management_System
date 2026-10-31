@@ -217,7 +217,10 @@ const updateSubscriptionStatus = async (req, res) => {
     }
 
     // Retrieve the subscription
-    const subscription = await Subscription.findById(id);
+    const subscription = await Subscription.findById(id)
+      .populate('customer_id', 'name email phone')
+      .populate('plan_id', 'name billing_frequency renewal_behavior')
+      .populate('lines.variant_id');
     if (!subscription) {
       return res.status(404).json({
         success: false,
@@ -298,7 +301,13 @@ const getAllSubscriptions = async (req, res) => {
       filter.customer_id = req.query.customer_id;
     }
 
-    const subscriptions = await Subscription.find(filter).sort({ createdAt: -1 });
+    if (req.user && req.user.role === 'customer') {
+      filter.customer_id = req.user._id || req.user.id;
+    }
+    const subscriptions = await Subscription.find(filter)
+      .populate('customer_id', 'name email phone')
+      .populate('plan_id', 'name billing_frequency renewal_behavior')
+      .sort({ createdAt: -1 });
 
     return res.status(200).json({
       success: true,

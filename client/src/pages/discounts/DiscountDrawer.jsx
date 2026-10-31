@@ -5,6 +5,7 @@ import { Input } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
 import { ResourcePicker } from '../../components/ui/ResourcePicker';
 import { useToast } from '../../hooks/useToast';
+import { AlertCircle } from 'lucide-react';
 
 export function DiscountDrawer({ open, onClose, onSave, initialData }) {
   const [formData, setFormData] = useState({
@@ -18,8 +19,10 @@ export function DiscountDrawer({ open, onClose, onSave, initialData }) {
     usage_limit: 100,
     applicability: 'Whole_Subscription',
     applicable_product_id: '',
+    active: true,
   });
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const toast = useToast();
 
   useEffect(() => {
@@ -30,11 +33,12 @@ export function DiscountDrawer({ open, onClose, onSave, initialData }) {
         value: initialData.value || 0,
         min_purchase_amount: initialData.min_purchase_amount || 0,
         min_quantity: initialData.min_quantity || 1,
-        valid_from: initialData.valid_from ? initialData.valid_from.slice(0, 10) : '',
+        valid_from: initialData.valid_from ? initialData.valid_from.slice(0, 10) : new Date().toISOString().slice(0, 10),
         valid_to: initialData.valid_to ? initialData.valid_to.slice(0, 10) : '',
         usage_limit: initialData.usage_limit || 100,
         applicability: initialData.applicability || 'Whole_Subscription',
         applicable_product_id: initialData.applicable_product_id?._id || initialData.applicable_product_id || '',
+        active: initialData.active !== undefined ? initialData.active : true,
       });
     } else {
       setFormData({
@@ -48,28 +52,48 @@ export function DiscountDrawer({ open, onClose, onSave, initialData }) {
         usage_limit: 100,
         applicability: 'Whole_Subscription',
         applicable_product_id: '',
+        active: true,
       });
     }
+    setError('');
   }, [initialData, open]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError('');
+
+    const numVal = Number(formData.value);
+    if (formData.type === 'Percentage' && numVal > 100) {
+      setError('Percentage discount cannot exceed 100%');
+      return;
+    }
+    if (numVal < 0) {
+      setError('Discount value cannot be negative');
+      return;
+    }
+
+    if (formData.applicability === 'Specific_Product' && !formData.applicable_product_id) {
+      setError('Please select an applicable product variant');
+      return;
+    }
+
     setLoading(true);
     try {
       const payload = {
         ...formData,
-        value: Number(formData.value),
-        min_purchase_amount: Number(formData.min_purchase_amount),
-        min_quantity: Number(formData.min_quantity),
-        usage_limit: Number(formData.usage_limit),
-        applicable_product_id: formData.applicability === 'Specific_Product' ? formData.applicable_product_id : null,
+        value: numVal,
+        min_purchase_amount: Number(formData.min_purchase_amount) || 0,
+        min_quantity: Number(formData.min_quantity) || 1,
+        usage_limit: Number(formData.usage_limit) || 100,
+        applicable_product_id: formData.applicability === 'Specific_Product' ? formData.applicable_product_id : undefined,
+        valid_to: formData.valid_to ? formData.valid_to : null,
       };
 
       await onSave(payload, initialData?._id);
       toast.success(initialData ? 'Discount rule updated' : 'Discount rule created');
       onClose();
     } catch (err) {
-      toast.error(err.message || 'Failed to save discount rule', 'Error');
+      toast.error(err.message || 'Failed to save discount rule');
     } finally {
       setLoading(false);
     }
@@ -79,18 +103,24 @@ export function DiscountDrawer({ open, onClose, onSave, initialData }) {
     <Drawer
       open={open}
       onClose={onClose}
-      title={initialData ? 'Edit Discount Rule' : 'Create Discount Rule'}
-      description="Define promotional incentives, volume gates, and usage limits."
+      title={initialData ? 'Edit Discount Rule' : 'New Discount Rule'}
+      description="Define percentage or fixed reduction constraints, limits, and product eligibility."
       width="max-w-md"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
+        {error && (
+          <div className="p-3 rounded-lg border border-[var(--color-accent-border)] bg-[var(--color-accent-tint)] flex items-center gap-2 text-xs text-[var(--color-accent)] font-medium">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
         <Input
-          label="Rule Name"
-          type="text"
+          label="Rule Name / Code"
           value={formData.name}
-          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+          onChange={(e) => setFormData({ ...formData, name: e.target.value.toUpperCase() })}
+          placeholder="e.g. Q4_ENTERPRISE_10"
           required
-          placeholder="e.g. Early Stage Startup 15% Off"
         />
 
         <div className="grid grid-cols-2 gap-4">
@@ -100,14 +130,15 @@ export function DiscountDrawer({ open, onClose, onSave, initialData }) {
             onChange={(e) => setFormData({ ...formData, type: e.target.value })}
           >
             <option value="Percentage">Percentage (%)</option>
-            <option value="Fixed">Fixed Amount ($)</option>
+            <option value="Fixed">Fixed Currency Amount</option>
           </Select>
 
           <Input
-            label={formData.type === 'Percentage' ? 'Value (%)' : 'Amount ($)'}
+            label={formData.type === 'Percentage' ? 'Rate (%)' : 'Amount'}
             type="number"
             min="0"
             max={formData.type === 'Percentage' ? 100 : undefined}
+            step="0.01"
             value={formData.value}
             onChange={(e) => setFormData({ ...formData, value: e.target.value })}
             required
@@ -119,22 +150,25 @@ export function DiscountDrawer({ open, onClose, onSave, initialData }) {
           value={formData.applicability}
           onChange={(e) => setFormData({ ...formData, applicability: e.target.value })}
         >
-          <option value="Whole_Subscription">Whole Subscription (Entire subtotal)</option>
-          <option value="Specific_Product">Specific Product Line Only</option>
+          <option value="Whole_Subscription">Whole Subscription Total</option>
+          <option value="Specific_Product">Specific Product Line</option>
         </Select>
 
+        {/* Applicability Reveal when Specific_Product selected */}
         {formData.applicability === 'Specific_Product' && (
-          <ResourcePicker
-            type="variant"
-            value={formData.applicable_product_id}
-            onChange={(val) => setFormData({ ...formData, applicable_product_id: val })}
-            label="Target Product Variant"
-          />
+          <div className="p-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-canvas)]">
+            <ResourcePicker
+              type="variant"
+              value={formData.applicable_product_id}
+              onChange={(val) => setFormData({ ...formData, applicable_product_id: val })}
+              label="Select Eligible Product Variant"
+            />
+          </div>
         )}
 
         <div className="grid grid-cols-2 gap-4">
           <Input
-            label="Min Purchase ($)"
+            label="Min Purchase Amount"
             type="number"
             min="0"
             value={formData.min_purchase_amount}
@@ -142,22 +176,14 @@ export function DiscountDrawer({ open, onClose, onSave, initialData }) {
           />
 
           <Input
-            label="Min Quantity"
+            label="Usage Limit"
             type="number"
             min="1"
-            value={formData.min_quantity}
-            onChange={(e) => setFormData({ ...formData, min_quantity: e.target.value })}
+            value={formData.usage_limit}
+            onChange={(e) => setFormData({ ...formData, usage_limit: e.target.value })}
+            required
           />
         </div>
-
-        <Input
-          label="Usage Cap Limit"
-          type="number"
-          min="1"
-          value={formData.usage_limit}
-          onChange={(e) => setFormData({ ...formData, usage_limit: e.target.value })}
-          helperText="Maximum times this discount can be consumed across all contracts"
-        />
 
         <div className="grid grid-cols-2 gap-4">
           <Input
@@ -169,23 +195,35 @@ export function DiscountDrawer({ open, onClose, onSave, initialData }) {
           />
 
           <Input
-            label="Valid To"
+            label="Valid To (Optional)"
             type="date"
             value={formData.valid_to}
             onChange={(e) => setFormData({ ...formData, valid_to: e.target.value })}
           />
         </div>
 
-        <div className="flex items-center justify-end gap-2 pt-6 border-t border-[var(--color-border)]">
-          <Button type="button" variant="ghost" onClick={onClose}>
+        <div className="flex items-center gap-2 pt-2">
+          <input
+            type="checkbox"
+            id="discount-active"
+            checked={formData.active}
+            onChange={(e) => setFormData({ ...formData, active: e.target.checked })}
+            className="rounded border-[var(--color-border)] text-[var(--color-accent)]"
+          />
+          <label htmlFor="discount-active" className="text-xs text-[var(--color-ink)] font-medium">
+            Rule is active and will evaluate during billing
+          </label>
+        </div>
+
+        <div className="flex justify-end gap-3 pt-4 border-t border-[var(--color-border)]">
+          <Button variant="ghost" onClick={onClose} type="button">
             Cancel
           </Button>
-          <Button type="submit" loading={loading}>
-            Save Discount Rule
+          <Button variant="primary" type="submit" loading={loading}>
+            Save Rule
           </Button>
         </div>
       </form>
     </Drawer>
   );
 }
-

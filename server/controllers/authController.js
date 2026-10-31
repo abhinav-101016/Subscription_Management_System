@@ -257,9 +257,32 @@ const resetPassword = async (req, res) => {
 const me = async (req, res) => {
   try {
     const user = await User.findOne({ email: req.user.email }).select("-password -signupOtp -resetOtp");
-    res.json({ user: user || req.user });
+    const activeUser = user || req.user;
+    const userData = {
+      _id: activeUser._id,
+      id: activeUser._id,
+      name: activeUser.name,
+      email: activeUser.email,
+      role: activeUser.role || "customer",
+    };
+    res.json({
+      success: true,
+      data: userData,
+      user: userData,
+    });
   } catch (error) {
-    res.json({ user: req.user });
+    const fallbackData = {
+      _id: req.user._id,
+      id: req.user._id,
+      name: req.user.name,
+      email: req.user.email,
+      role: req.user.role || "customer",
+    };
+    res.json({
+      success: true,
+      data: fallbackData,
+      user: fallbackData,
+    });
   }
 };
 

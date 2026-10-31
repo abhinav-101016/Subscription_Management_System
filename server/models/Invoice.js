@@ -183,6 +183,14 @@ invoiceSchema.index({ status: 1, billing_period_start: 1, amount_due: 1 });
 invoiceSchema.index({ status: 1, createdAt: -1 });
 invoiceSchema.index({ customer_id: 1, status: 1 });
 
+// Virtual due_date defaults to billing_period_end
+invoiceSchema.virtual('due_date').get(function () {
+  return this.billing_period_end;
+});
+
+invoiceSchema.set('toJSON', { virtuals: true });
+invoiceSchema.set('toObject', { virtuals: true });
+
 const Invoice = mongoose.model('Invoice', invoiceSchema);
 
 module.exports = {

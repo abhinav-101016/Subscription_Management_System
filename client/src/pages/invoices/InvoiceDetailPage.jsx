@@ -1,386 +1,331 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useState } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
   Printer,
   CreditCard,
   CheckCircle2,
   AlertCircle,
-  FileText,
   Clock,
-  Building,
+  ExternalLink,
+  ShieldCheck,
 } from 'lucide-react';
-import { apiRequest } from '../../lib/apiClient';
+import { api } from '../../lib/apiClient';
 import { Button } from '../../components/ui/Button';
 import { StatusPill } from '../../components/ui/StatusPill';
-import { Stepper } from '../../components/ui/Stepper';
 import { MoneyText } from '../../components/ui/MoneyText';
-import { DateText } from '../../components/ui/DateText';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { RecordPaymentDialog } from '../payments/RecordPaymentDialog';
-import { truncateId } from '../../lib/utils';
+import { cn, formatDate, formatCurrency } from '../../lib/utils';
 import { useToast } from '../../hooks/useToast';
+import { useAuth } from '../../features/auth/AuthContext';
 
 export default function InvoiceDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
-
-  const [invoice, setInvoice] = useState(null);
-  const [payments, setPayments] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const { role } = useAuth();
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
 
-  const fetchInvoiceData = async () => {
-    setLoading(true);
-    try {
-      const [invData, allPayments] = await Promise.all([
-        apiRequest(`/api/invoices/${id}`),
-        apiRequest('/api/payments'),
-      ]);
+  // 1. Fetch Invoice
+  const {
+    data: invoice,
+    isLoading: loadingInvoice,
+    error: invoiceError,
+  } = useQuery({
+    queryKey: ['invoice-detail', id],
+    queryFn: async () => {
+      const res = await api.get(`/api/invoices/${id}`);
+      return res?.data || res;
+    },
+  });
 
-      setInvoice(invData);
-      const linked = (allPayments || []).filter(
-        (p) => p.invoice_id?._id === id || p.invoice_id === id
-      );
-      setPayments(linked);
-    } catch (err) {
-      toast.error('Failed to load invoice details', 'Error');
-    } finally {
-      setLoading(false);
-    }
-  };
+  // 2. Fetch Payment History for this invoice
+  const { data: payments = [] } = useQuery({
+    queryKey: ['invoice-payments', id],
+    queryFn: async () => {
+      const res = await api.get(`/api/invoices/${id}/payments`);
+      return Array.isArray(res) ? res : res?.data || [];
+    },
+    enabled: !!id,
+  });
 
-  useEffect(() => {
-    fetchInvoiceData();
-  }, [id]);
+  // Status progression mutation (Draft -> Confirmed)
+  const statusMutation = useMutation({
+    mutationFn: async (nextStatus) => {
+      return await api.patch(`/api/invoices/${id}/status`, { status: nextStatus });
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData(['invoice-detail', id], updated?.data || updated);
+      queryClient.invalidateQueries({ queryKey: ['invoices-list'] });
+      toast.success(`Invoice marked as ${updated?.status || 'Confirmed'}`);
+    },
+    onError: (err) => {
+      toast.error(err.message || 'Failed to update invoice status');
+    },
+  });
 
   const handlePrint = () => {
     window.print();
   };
 
-  const handlePaymentSuccess = (result) => {
-    // If backend returns updated invoice, update local state
-    if (result?.invoice) {
-      setInvoice(result.invoice);
-    } else {
-      fetchInvoiceData();
-    }
-  };
+  const backPath = role === 'customer' ? '/app/portal/invoices' : '/app/invoices';
 
-  if (loading) {
+  if (loadingInvoice) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 max-w-4xl mx-auto">
         <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-96 w-full" />
+        <Skeleton className="h-[600px] w-full rounded-xl" />
       </div>
     );
   }
 
-  if (!invoice) {
+  if (invoiceError || !invoice) {
     return (
-      <div className="text-center py-16 space-y-3">
-        <p className="text-sm text-[var(--color-ink-muted)]">Invoice not found.</p>
-        <Button variant="secondary" onClick={() => navigate('/invoices')}>
-          Back to Invoices
+      <div className="p-12 text-center space-y-4 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl max-w-xl mx-auto">
+        <p className="text-sm text-[var(--color-ink-muted)]">
+          {invoiceError?.message || 'Invoice record could not be found.'}
+        </p>
+        <Button variant="secondary" onClick={() => navigate(backPath)}>
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Return to Invoices
         </Button>
       </div>
     );
   }
 
-  const invoiceSteps = ['Draft', 'Confirmed', 'Paid'];
-  const allowedTransitions = invoice.status === 'Draft' ? ['Confirmed'] : invoice.status === 'Confirmed' ? ['Paid'] : [];
-
-  const handleStatusAdvance = async (nextStatus) => {
-    try {
-      const updated = await apiRequest(`/api/invoices/${id}/status`, {
-        method: 'PATCH',
-        body: JSON.stringify({ status: nextStatus }),
-      });
-      setInvoice(updated);
-      toast.success(`Invoice marked as ${nextStatus}`);
-    } catch (err) {
-      toast.error(err.message || 'Status transition failed', 'Error');
-    }
-  };
-
   const isPaid = invoice.status === 'Paid' || (invoice.amount_due !== undefined && invoice.amount_due <= 0);
+  const isOverdue = !isPaid && invoice.due_date && new Date(invoice.due_date) < new Date();
+  const amountDue = invoice.amount_due !== undefined ? Number(invoice.amount_due) : Number(invoice.grand_total);
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-200">
-      {/* Top Action Bar (Hidden when printing) */}
-      <div className="no-print flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-[var(--color-border)]">
+    <div className="space-y-8 max-w-4xl mx-auto text-[var(--color-ink)]">
+      {/* Sticky Action Bar (Hidden on Print) */}
+      <div className="no-print sticky top-4 z-20 bg-[var(--color-surface)]/95 backdrop-blur-md border border-[var(--color-border)] p-4 rounded-xl flex items-center justify-between gap-4 shadow-sm">
+        <Link
+          to={backPath}
+          className="inline-flex items-center gap-1.5 text-xs text-[var(--color-ink-muted)] hover:text-[var(--color-ink)] transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span>Back to Invoices</span>
+        </Link>
+
         <div className="flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => navigate('/invoices')}
-            title="Back to invoices"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </Button>
-          <div>
-            <div className="flex items-center gap-2.5">
-              <h1 className="font-serif-display text-2xl font-medium tracking-tight text-[var(--color-ink)]">
-                Invoice {invoice.invoice_number}
-              </h1>
-              <StatusPill status={invoice.status} />
-            </div>
-            <p className="text-xs text-[var(--color-ink-muted)] mt-0.5">
-              Ref: <span className="font-num">{truncateId(invoice._id, 8, 4)}</span>
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handlePrint}
-            icon={Printer}
-          >
-            Print Statement
-          </Button>
-
-          {!isPaid && (
+          {invoice.status === 'Draft' && role !== 'customer' && (
             <Button
-              size="sm"
-              onClick={() => setIsPaymentOpen(true)}
-              icon={CreditCard}
+              variant="secondary"
+              loading={statusMutation.isPending}
+              onClick={() => statusMutation.mutate('Confirmed')}
             >
-              Record Payment
+              Confirm Invoice
             </Button>
           )}
 
-          {allowedTransitions.map((nextSt) => (
+          {invoice.status === 'Confirmed' && amountDue > 0 && (
             <Button
-              key={nextSt}
-              variant="outline"
-              size="sm"
-              onClick={() => handleStatusAdvance(nextSt)}
+              variant="primary"
+              onClick={() => setIsPaymentOpen(true)}
+              icon={CreditCard}
             >
-              Mark as {nextSt}
+              Record Payment Settlement
             </Button>
-          ))}
+          )}
+
+          <Button variant="ghost" onClick={handlePrint} icon={Printer}>
+            Print / Download PDF
+          </Button>
         </div>
       </div>
 
-      {/* Stepper (Hidden when printing) */}
-      <div className="no-print p-5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] space-y-3">
-        <div className="flex items-center justify-between text-xs">
-          <span className="font-semibold uppercase tracking-wider text-[var(--color-ink-faint)]">
-            Invoice Settlement Stepper
-          </span>
-          <span className="text-[var(--color-ink-muted)]">
-            State: <span className="font-medium text-[var(--color-ink)]">{invoice.status}</span>
-          </span>
-        </div>
-        <Stepper
-          steps={invoiceSteps}
-          currentStep={invoice.status}
-          allowedTransitions={allowedTransitions}
-          onTransition={handleStatusAdvance}
-        />
-      </div>
+      {/* The Paper Document (Centered on Desk Background) */}
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-8 sm:p-12 shadow-sm space-y-8 relative overflow-hidden">
+        {/* Subtle Stamp Watermark */}
+        {isPaid ? (
+          <div className="stamp-paid absolute right-12 top-28 px-4 py-1.5 text-sm rounded font-mono">
+            SETTLED IN FULL
+          </div>
+        ) : isOverdue ? (
+          <div className="stamp-overdue absolute right-12 top-28 px-4 py-1.5 text-sm rounded font-mono">
+            PAST DUE ARREARS
+          </div>
+        ) : null}
 
-      {/* Printable Invoice Document */}
-      <div className="printable-document p-8 md:p-12 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm space-y-8 max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-6 pb-8 border-b border-[var(--color-border)]">
-          <div className="space-y-2">
+        {/* Letterhead */}
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-6 pb-6 border-b border-[var(--color-border)]">
+          <div>
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-[#0D4A38] dark:bg-[#15805D] text-white flex items-center justify-center font-serif-display text-lg font-bold">
+              <div className="w-7 h-7 rounded bg-[var(--color-ink)] text-[var(--color-canvas)] flex items-center justify-center font-serif text-base font-bold">
                 C
               </div>
-              <span className="font-serif-display text-2xl font-medium tracking-tight text-[var(--color-ink)]">
-                Cadence Finance
+              <span className="font-serif-display text-2xl font-semibold tracking-tight text-[var(--color-ink)]">
+                Cadence
               </span>
             </div>
-            <div className="text-xs text-[var(--color-ink-muted)] space-y-0.5 leading-relaxed">
-              <p>548 Market Street, Suite 3400</p>
-              <p>San Francisco, CA 94104</p>
-              <p className="font-num">tax-id: US-EIN-94-2819034</p>
-            </div>
+            <p className="text-[11px] font-mono text-[var(--color-ink-muted)] mt-1 uppercase tracking-wider">
+              Recurring Financial Statement & Tax Invoice
+            </p>
           </div>
 
-          <div className="text-left sm:text-right space-y-1">
-            <div className="font-num text-xs uppercase tracking-widest text-[var(--color-ink-faint)]">
-              Tax Invoice
-            </div>
-            <div className="font-num text-2xl font-semibold text-[var(--color-ink)]">
-              {invoice.invoice_number}
-            </div>
-            <div className="text-xs text-[var(--color-ink-muted)] space-y-1 pt-1">
-              <div>
-                Date Issued: <DateText date={invoice.issue_date || invoice.createdAt} />
-              </div>
-              <div>
-                Payment Due: <DateText date={invoice.due_date} className="font-medium text-[var(--color-ink)]" />
-              </div>
+          <div className="text-left sm:text-right space-y-1 font-mono">
+            <span className="text-xs uppercase text-[var(--color-ink-muted)] block">Invoice Number</span>
+            <div className="text-base font-bold text-[var(--color-ink)]">{invoice.invoice_number}</div>
+            <div className="text-[11px] text-[var(--color-ink-faint)]">
+              Issued: {formatDate(invoice.createdAt || invoice.billing_period_start)}
             </div>
           </div>
         </div>
 
-        {/* Billed To / Subscription Details */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pb-6 border-b border-[var(--color-border)] text-xs">
-          <div>
-            <span className="font-semibold uppercase tracking-wider text-[var(--color-ink-faint)] block mb-1">
-              Billed To
+        {/* Billed To & Contract Schedule */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 text-xs">
+          <div className="space-y-1">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--color-ink-muted)]">
+              Billed To Customer
             </span>
-            <div className="font-medium text-sm text-[var(--color-ink)]">
-              {invoice.customer_id?.name || 'Enterprise Customer'}
-            </div>
-            <div className="text-[var(--color-ink-muted)] mt-0.5">
-              {invoice.customer_id?.email || 'accounts@enterprise.com'}
-            </div>
-            <div className="text-[var(--color-ink-faint)] mt-1">
-              Customer Ref: {truncateId(invoice.customer_id?._id || invoice.customer_id, 8, 4)}
-            </div>
+            <p className="text-sm font-semibold text-[var(--color-ink)]">
+              {invoice.customer_id?.name || 'Customer Account'}
+            </p>
+            <p className="text-xs text-[var(--color-ink-muted)] font-mono">
+              {invoice.customer_id?.email || '—'}
+            </p>
+            {invoice.customer_id?.phone && (
+              <p className="text-[11px] text-[var(--color-ink-faint)] font-mono">
+                {invoice.customer_id.phone}
+              </p>
+            )}
           </div>
 
-          <div className="sm:text-right space-y-1">
-            <span className="font-semibold uppercase tracking-wider text-[var(--color-ink-faint)] block mb-1">
-              Recurring Contract
-            </span>
-            <div className="font-medium text-[var(--color-ink)]">
-              Subscription #{truncateId(invoice.subscription_id?._id || invoice.subscription_id, 8, 4)}
+          <div className="space-y-2 sm:text-right font-mono text-xs">
+            <div className="flex justify-between sm:justify-end gap-4">
+              <span className="text-[var(--color-ink-muted)]">Billing Cycle:</span>
+              <span>
+                {formatDate(invoice.billing_period_start, 'short')} – {formatDate(invoice.billing_period_end, 'short')}
+              </span>
             </div>
-            <div className="text-[var(--color-ink-muted)]">
-              Settlement Status: <span className="font-semibold">{invoice.status}</span>
+            <div className="flex justify-between sm:justify-end gap-4">
+              <span className="text-[var(--color-ink-muted)]">Due Date:</span>
+              <span className="font-semibold text-[var(--color-accent)]">
+                {formatDate(invoice.due_date || invoice.billing_period_end, 'short')}
+              </span>
+            </div>
+            <div className="flex justify-between sm:justify-end gap-4">
+              <span className="text-[var(--color-ink-muted)]">Linked Contract:</span>
+              <span className="text-[var(--color-ink)]">
+                {invoice.subscription_id?.subscription_number || 'Contract Ref'}
+              </span>
             </div>
           </div>
         </div>
 
-        {/* Invoice Line Items */}
-        <div className="space-y-4">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="border-b border-[var(--color-border)] text-[var(--color-ink-muted)]">
-                <th className="py-2 font-medium">Description</th>
-                <th className="py-2 text-right font-medium">Qty</th>
-                <th className="py-2 text-right font-medium">Unit Price</th>
-                <th className="py-2 text-right font-medium">Amount</th>
+        {/* Ruled Line Items Table */}
+        <div className="border border-[var(--color-border)] rounded-lg overflow-hidden">
+          <table className="w-full text-xs text-left">
+            <thead className="bg-[var(--color-canvas)] border-b border-[var(--color-border)] font-mono uppercase text-[10px] text-[var(--color-ink-muted)]">
+              <tr>
+                <th className="py-2.5 px-6">Service / Product Item</th>
+                <th className="py-2.5 px-4 text-right">Quantity</th>
+                <th className="py-2.5 px-4 text-right">Unit Price</th>
+                <th className="py-2.5 px-6 text-right">Line Total</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[var(--color-border-subtle)]">
-              {(invoice.lines || [
-                {
-                  product_variant_id: { name: 'Platform Enterprise Subscription' },
-                  quantity: 1,
-                  unit_price: invoice.subtotal || invoice.grand_total,
-                },
-              ]).map((line, idx) => {
-                const total = (line.quantity || 1) * (line.unit_price || 0);
-                return (
-                  <tr key={idx}>
-                    <td className="py-3">
-                      <div className="font-medium text-[var(--color-ink)]">
-                        {line.product_variant_id?.name || 'Recurring Service Line'}
-                      </div>
-                      <div className="text-[11px] text-[var(--color-ink-faint)]">
-                        {line.product_variant_id?.sku || `SKU-ITEM-${idx + 1}`}
-                      </div>
-                    </td>
-                    <td className="py-3 text-right font-num">{line.quantity || 1}</td>
-                    <td className="py-3 text-right">
-                      <MoneyText amount={line.unit_price} />
-                    </td>
-                    <td className="py-3 text-right font-medium">
-                      <MoneyText amount={total} />
-                    </td>
-                  </tr>
-                );
-              })}
+            <tbody className="divide-y divide-[var(--color-border)] font-num">
+              {(invoice.lines || []).map((line, idx) => (
+                <tr key={idx} className="hover:bg-[var(--color-surface-hover)]">
+                  <td className="py-3 px-6 font-ui">
+                    <span className="font-medium text-[var(--color-ink)]">
+                      {line.variant_id?.variant_name || line.variant_id?.attribute_value || 'Seat Subscription'}
+                    </span>
+                    <span className="text-[10px] font-mono text-[var(--color-ink-faint)] block">
+                      SKU: {line.variant_id?.sku || 'SKU-RECUR'}
+                    </span>
+                  </td>
+                  <td className="py-3 px-4 text-right">{line.quantity}</td>
+                  <td className="py-3 px-4 text-right">{formatCurrency(line.unit_price)}</td>
+                  <td className="py-3 px-6 text-right font-semibold text-[var(--color-ink)]">
+                    {formatCurrency(line.total ?? line.quantity * line.unit_price)}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
 
-        {/* Financial Summary Calculation Table */}
-        <div className="flex justify-end pt-4 border-t border-[var(--color-border)]">
-          <div className="w-full sm:w-72 space-y-2 text-xs">
-            <div className="flex justify-between text-[var(--color-ink-muted)]">
-              <span>Subtotal</span>
-              <MoneyText amount={invoice.subtotal || invoice.grand_total} />
+        {/* Calculation Summary Block */}
+        <div className="flex justify-end pt-4">
+          <div className="w-full sm:w-80 space-y-2 text-xs font-mono">
+            <div className="flex justify-between py-1 border-b border-[var(--color-border-subtle)]">
+              <span className="text-[var(--color-ink-muted)]">Subtotal Amount:</span>
+              <span className="font-num">{formatCurrency(invoice.subtotal_amount || invoice.grand_total)}</span>
             </div>
 
             {invoice.discount_total > 0 && (
-              <div className="flex justify-between text-[#15805D]">
-                <span>Discount Applied</span>
-                <span className="font-num">-<MoneyText amount={invoice.discount_total} /></span>
+              <div className="flex justify-between py-1 border-b border-[var(--color-border-subtle)] text-emerald-700 dark:text-emerald-400">
+                <span>Discount Deduction:</span>
+                <span className="font-num">-{formatCurrency(invoice.discount_total)}</span>
               </div>
             )}
 
             {invoice.tax_total > 0 && (
-              <div className="flex justify-between text-[var(--color-ink-muted)]">
-                <span>
-                  Tax {invoice.tax_rule_applied?.percentage_rate ? `(${invoice.tax_rule_applied.percentage_rate}%)` : ''}
-                </span>
-                <MoneyText amount={invoice.tax_total} />
+              <div className="flex justify-between py-1 border-b border-[var(--color-border-subtle)]">
+                <span className="text-[var(--color-ink-muted)]">Statutory Tax:</span>
+                <span className="font-num">+{formatCurrency(invoice.tax_total)}</span>
               </div>
             )}
 
-            <div className="flex justify-between text-sm font-semibold text-[var(--color-ink)] pt-2 border-t border-[var(--color-border)]">
-              <span>Grand Total</span>
-              <MoneyText amount={invoice.grand_total} />
+            <div className="flex justify-between py-2 border-b border-[var(--color-border)] font-semibold text-sm">
+              <span className="font-serif-display text-base">Grand Total:</span>
+              <span className="font-num">{formatCurrency(invoice.grand_total)}</span>
             </div>
 
-            <div className="flex justify-between text-xs text-[var(--color-ink-muted)]">
-              <span>Amount Paid</span>
-              <MoneyText amount={invoice.amount_paid || 0} />
+            <div className="flex justify-between py-1 text-[var(--color-ink-muted)]">
+              <span>Amount Settled / Paid:</span>
+              <span className="font-num">{formatCurrency(invoice.amount_paid || 0)}</span>
             </div>
 
-            <div className="flex justify-between text-sm font-semibold pt-2 border-t border-[var(--color-border)]">
-              <span className={invoice.amount_due > 0 ? 'text-[#B91C1C]' : 'text-[#15805D]'}>
-                Balance Due
-              </span>
-              <MoneyText
-                amount={invoice.amount_due ?? 0}
-                className={invoice.amount_due > 0 ? 'text-[#B91C1C]' : 'text-[#15805D]'}
-              />
+            <div className="flex justify-between py-2 pt-3 font-bold text-base text-[var(--color-accent)] border-t border-[var(--color-border)]">
+              <span className="font-serif-display text-lg">Balance Due:</span>
+              <span className="font-num text-xl">{formatCurrency(amountDue)}</span>
             </div>
           </div>
         </div>
 
-        {/* Associated Payment History Ledger */}
-        <div className="pt-6 border-t border-[var(--color-border)] space-y-3">
-          <h4 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-muted)]">
-            Settlement & Payment Records
-          </h4>
+        {/* Reconciliation Settlement Timeline */}
+        <div className="pt-8 border-t border-[var(--color-border)] space-y-4">
+          <div className="flex items-center justify-between">
+            <h4 className="font-serif-display text-base font-semibold">
+              Payment Settlement Ledger ({payments.length})
+            </h4>
+            {invoice.status === 'Confirmed' && amountDue > 0 && (
+              <Button
+                variant="secondary"
+                size="xs"
+                onClick={() => setIsPaymentOpen(true)}
+                icon={CreditCard}
+              >
+                Record Payment
+              </Button>
+            )}
+          </div>
 
           {payments.length === 0 ? (
-            <p className="text-xs text-[var(--color-ink-faint)] italic">
-              No payments recorded against this invoice yet.
+            <p className="text-xs text-[var(--color-ink-muted)] italic">
+              No payments have been posted against this invoice.
             </p>
           ) : (
-            <div className="border border-[var(--color-border)] rounded-lg overflow-hidden text-xs">
-              <table className="w-full text-left border-collapse">
-                <thead className="bg-[var(--color-canvas-subtle)] text-[var(--color-ink-muted)]">
-                  <tr>
-                    <th className="py-2 px-3 font-medium">Payment ID</th>
-                    <th className="py-2 px-3 font-medium">Method</th>
-                    <th className="py-2 px-3 font-medium">Date</th>
-                    <th className="py-2 px-3 font-medium">Notes</th>
-                    <th className="py-2 px-3 font-medium text-right">Amount</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--color-border)]">
-                  {payments.map((p) => (
-                    <tr key={p._id}>
-                      <td className="py-2.5 px-3 font-num">{truncateId(p._id, 6, 4)}</td>
-                      <td className="py-2.5 px-3 font-medium">{p.method}</td>
-                      <td className="py-2.5 px-3">
-                        <DateText date={p.payment_date} format="short" />
-                      </td>
-                      <td className="py-2.5 px-3 text-[var(--color-ink-muted)]">
-                        {p.notes || '—'}
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-num font-semibold text-[#15805D]">
-                        +<MoneyText amount={p.amount} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="divide-y divide-[var(--color-border)] border border-[var(--color-border)] rounded-lg overflow-hidden">
+              {payments.map((p) => (
+                <div key={p._id} className="p-3 px-4 flex items-center justify-between text-xs font-mono bg-[var(--color-canvas)]">
+                  <div>
+                    <span className="font-semibold text-[var(--color-ink)]">{p.method}</span>
+                    <span className="text-[10px] text-[var(--color-ink-faint)] block">
+                      Posted: {formatDate(p.payment_date || p.createdAt)} • Ref: {p._id.slice(-8)}
+                    </span>
+                    {p.notes && <p className="text-[11px] text-[var(--color-ink-muted)] italic mt-0.5">{p.notes}</p>}
+                  </div>
+                  <MoneyText amount={p.amount} className="font-bold text-emerald-700 dark:text-emerald-400 font-num text-sm" />
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -391,9 +336,14 @@ export default function InvoiceDetailPage() {
         open={isPaymentOpen}
         onClose={() => setIsPaymentOpen(false)}
         invoice={invoice}
-        onPaymentRecorded={handlePaymentSuccess}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ['invoice-detail', id] });
+          queryClient.invalidateQueries({ queryKey: ['invoice-payments', id] });
+          queryClient.invalidateQueries({ queryKey: ['invoices-list'] });
+          queryClient.invalidateQueries({ queryKey: ['payments-list'] });
+          setIsPaymentOpen(false);
+        }}
       />
     </div>
   );
 }
-

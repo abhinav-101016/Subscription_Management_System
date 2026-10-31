@@ -1,136 +1,174 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../features/auth/AuthContext';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { useToast } from '../../hooks/useToast';
-import { ArrowRight, ShieldCheck, Lock } from 'lucide-react';
+import { ArrowRight, Lock, ShieldCheck } from 'lucide-react';
+import { getDefaultPathForRole } from '../../routes/routeConfig';
+import { formatCurrency } from '../../lib/utils';
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('alexander@mercury-holdings.co');
-  const [password, setPassword] = useState('Password@123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const { login, switchRole } = useAuth();
+  const [serverError, setServerError] = useState('');
+  const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const toast = useToast();
+
+  const searchParams = new URLSearchParams(location.search);
+  const nextParam = searchParams.get('next');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setServerError('');
     setLoading(true);
     try {
-      await login(email, password);
-      toast.success('Signed in successfully', 'Welcome back');
-      navigate('/dashboard');
+      const res = await login(email.trim(), password);
+      const userRole = res.user?.role || 'customer';
+      toast.success('Signed in successfully', `Welcome back, ${res.user?.name || res.user?.email}`);
+      const targetPath = nextParam ? decodeURIComponent(nextParam) : getDefaultPathForRole(userRole);
+      navigate(targetPath, { replace: true });
     } catch (err) {
-      toast.error(err.message || 'Invalid credentials', 'Authentication Failed');
+      setServerError(err.message || 'Invalid email or password.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleQuickDemo = (role) => {
-    switchRole(role);
-    toast.info(`Switched to ${role.toUpperCase()} persona`);
-    if (role === 'customer') {
-      navigate('/portal');
-    } else {
-      navigate('/dashboard');
-    }
-  };
-
   return (
-    <div className="min-h-screen flex flex-col justify-center items-center p-6 bg-[var(--color-canvas)]">
-      <div className="w-full max-w-sm space-y-8">
-        {/* Brand */}
-        <div className="text-center space-y-2">
-          <div className="inline-flex w-10 h-10 rounded-xl bg-[#0D4A38] dark:bg-[#15805D] text-white items-center justify-center font-serif-display text-xl font-bold shadow-sm">
-            C
-          </div>
-          <h1 className="font-serif-display text-3xl font-medium tracking-tight text-[var(--color-ink)]">
-            Cadence
-          </h1>
-          <p className="text-xs text-[var(--color-ink-muted)]">
-            Subscription Lifecycle & Recurring Settlement
-          </p>
+    <div className="min-h-screen grid grid-cols-1 lg:grid-cols-12 bg-[var(--color-canvas)] paper-texture text-[var(--color-ink)]">
+      {/* Left Form Panel */}
+      <div className="lg:col-span-5 flex flex-col justify-between p-8 sm:p-12 lg:p-16 border-r border-[var(--color-border)] bg-[var(--color-surface)]">
+        <div>
+          <Link to="/" className="inline-flex items-center gap-2.5 group">
+            <div className="w-8 h-8 rounded bg-[var(--color-ink)] text-[var(--color-canvas)] flex items-center justify-center font-serif text-lg font-bold">
+              C
+            </div>
+            <span className="font-serif-display text-xl font-semibold tracking-tight text-[var(--color-ink)]">
+              Cadence
+            </span>
+          </Link>
         </div>
 
-        {/* Card */}
-        <div className="p-6 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-xs space-y-6">
+        <div className="max-w-sm w-full mx-auto my-12 space-y-6">
+          <div className="space-y-1.5">
+            <h1 className="font-serif-display text-3xl font-normal tracking-tight">
+              Sign In to Ledger
+            </h1>
+            <p className="text-xs text-[var(--color-ink-muted)]">
+              Enter your credentials to access your contracts, invoices, and reports.
+            </p>
+          </div>
+
+          {serverError && (
+            <div className="p-3 rounded border border-[var(--color-accent-border)] bg-[var(--color-accent-tint)] text-xs text-[var(--color-accent)] font-medium">
+              {serverError}
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <Input
-              label="Work Email"
+              label="Work Email Address"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              placeholder="e.g. admin@example.com"
               required
-              placeholder="name@company.com"
+              autoFocus
             />
 
-            <Input
-              label="Password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              placeholder="••••••••"
-            />
-
-            <div className="flex items-center justify-between text-xs pt-1">
-              <Link
-                to="/verify-otp"
-                className="text-[var(--color-ink-muted)] hover:text-[var(--color-ink)] underline underline-offset-2"
-              >
-                Verify with OTP
-              </Link>
-              <Link
-                to="/signup"
-                className="text-[#0D4A38] dark:text-[#15805D] font-medium hover:underline"
-              >
-                Create account
-              </Link>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-[var(--color-ink-muted)]">Password</label>
+                <Link
+                  to="/forgot-password"
+                  className="text-xs text-[var(--color-accent)] hover:underline"
+                >
+                  Forgot password?
+                </Link>
+              </div>
+              <Input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••••••"
+                required
+              />
             </div>
 
-            <Button type="submit" loading={loading} className="w-full" size="lg">
+            <Button
+              type="submit"
+              variant="primary"
+              className="w-full mt-2"
+              loading={loading}
+              icon={ArrowRight}
+            >
               Sign In
             </Button>
           </form>
 
-          {/* Quick Demo Access Bar */}
-          <div className="pt-4 border-t border-[var(--color-border)] space-y-2">
-            <p className="text-[10px] uppercase font-semibold text-center tracking-wider text-[var(--color-ink-faint)]">
-              Instant Demo Access
-            </p>
-            <div className="grid grid-cols-3 gap-1.5">
-              <Button
-                variant="secondary"
-                size="xs"
-                onClick={() => handleQuickDemo('admin')}
-              >
-                Admin
-              </Button>
-              <Button
-                variant="secondary"
-                size="xs"
-                onClick={() => handleQuickDemo('staff')}
-              >
-                Staff
-              </Button>
-              <Button
-                variant="secondary"
-                size="xs"
-                onClick={() => handleQuickDemo('customer')}
-              >
-                Customer
-              </Button>
+          <div className="pt-4 border-t border-[var(--color-border)] text-center text-xs text-[var(--color-ink-muted)]">
+            Don’t have an account?{' '}
+            <Link to="/signup" className="text-[var(--color-accent)] font-medium hover:underline">
+              Create an account
+            </Link>
+          </div>
+        </div>
+
+        <div className="text-[11px] text-[var(--color-ink-faint)] font-mono">
+          Security: TLS 1.3 • AES-256 Encrypted Session
+        </div>
+      </div>
+
+      {/* Right Typographic Editorial Panel (The Ledger Statement) */}
+      <div className="hidden lg:col-span-7 lg:flex flex-col justify-between p-16 bg-[var(--color-canvas)] relative overflow-hidden">
+        <div className="max-w-xl space-y-6 z-10">
+          <p className="text-xs font-mono uppercase tracking-widest text-[var(--color-ink-muted)]">
+            Contract Billing & Reconciliation
+          </p>
+          <blockquote className="font-serif-display text-4xl lg:text-5xl font-light leading-tight tracking-tight text-[var(--color-ink)]">
+            “Recurring revenue demands the mathematical certainty of a printed statement.”
+          </blockquote>
+          <p className="text-sm text-[var(--color-ink-muted)] leading-relaxed max-w-lg">
+            Cadence provides contract state-machines, automated idempotent billing runs, and real-time ledger reconciliation without mock artifacts.
+          </p>
+        </div>
+
+        {/* Ruled Invoice Excerpt Document Graphic */}
+        <div className="w-full max-w-md bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg p-6 shadow-sm z-10 space-y-4">
+          <div className="flex justify-between items-start border-b border-[var(--color-border)] pb-3">
+            <div>
+              <span className="font-serif-display text-sm font-semibold">STATEMENT EXCERPT</span>
+              <p className="text-[10px] font-mono text-[var(--color-ink-muted)]">RECORD #INV-202610-001</p>
+            </div>
+            <div className="stamp-paid text-[10px] px-2 py-0.5 rounded">
+              VERIFIED
+            </div>
+          </div>
+
+          <div className="space-y-2 text-xs">
+            <div className="flex justify-between py-1 border-b border-[var(--color-border-subtle)] font-mono text-[11px]">
+              <span>Recurring Service License (Monthly)</span>
+              <span className="font-semibold">{formatCurrency(1500)}</span>
+            </div>
+            <div className="flex justify-between py-1 border-b border-[var(--color-border-subtle)] font-mono text-[11px]">
+              <span>Statutory VAT (18%)</span>
+              <span>{formatCurrency(270)}</span>
+            </div>
+            <div className="flex justify-between pt-1 font-serif-display text-sm font-bold">
+              <span>Settled Total</span>
+              <span className="font-num font-bold text-[var(--color-accent)]">{formatCurrency(1770)}</span>
             </div>
           </div>
         </div>
 
-        <p className="text-center text-xs text-[var(--color-ink-faint)]">
-          Protected by role-based RBAC and audit logs.
-        </p>
+        <div className="text-xs text-[var(--color-ink-faint)] font-mono z-10">
+          Cadence Enterprise Recurring Infrastructure
+        </div>
       </div>
     </div>
   );
 }
-

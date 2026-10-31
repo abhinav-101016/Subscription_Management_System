@@ -100,14 +100,33 @@ const getAllPayments = async (req, res) => {
       filter.invoice_id = req.query.invoice_id;
     }
 
+    if (req.query.start_date || req.query.end_date) {
+      filter.payment_date = {};
+      if (req.query.start_date) filter.payment_date.$gte = new Date(req.query.start_date);
+      if (req.query.end_date) filter.payment_date.$lte = new Date(req.query.end_date);
+    }
+
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit) || 50));
+    const skip = (page - 1) * limit;
+
+    const total = await Payment.countDocuments(filter);
     const payments = await Payment.find(filter)
       .populate('invoice_id', 'invoice_number grand_total amount_paid amount_due status')
-      .sort({ createdAt: -1 });
+      .sort({ payment_date: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
 
     return res.status(200).json({
       success: true,
       count: payments.length,
       data: payments,
+      pagination: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit) || 1,
+      },
     });
   } catch (error) {
     console.error('Error fetching payments:', error);

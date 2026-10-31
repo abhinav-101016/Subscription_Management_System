@@ -1,214 +1,244 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { CreditCard, Plus, Search, CheckCircle2 } from 'lucide-react';
-import { apiRequest } from '../../lib/apiClient';
-import { DataTable } from '../../components/ui/DataTable';
+import React, { useState, useMemo } from 'react';
+import { useSearchParams, Link } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { CreditCard, Plus, Search, Check, Copy, ExternalLink } from 'lucide-react';
+import { api } from '../../lib/apiClient';
 import { Button } from '../../components/ui/Button';
 import { MoneyText } from '../../components/ui/MoneyText';
-import { DateText } from '../../components/ui/DateText';
 import { RecordPaymentDialog } from './RecordPaymentDialog';
-import { truncateId } from '../../lib/utils';
-import { useToast } from '../../hooks/useToast';
+import { cn, formatDate } from '../../lib/utils';
+import { useAuth } from '../../features/auth/AuthContext';
 
 export default function PaymentsPage() {
-  const [payments, setPayments] = useState([]);
-  const [invoices, setInvoices] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [copiedId, setCopiedId] = useState(null);
+  const [isRecordOpen, setIsRecordOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
-  const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
-  const navigate = useNavigate();
-  const toast = useToast();
+  const { role } = useAuth();
+  const queryClient = useQueryClient();
 
-  const fetchPaymentsAndInvoices = async () => {
-    setLoading(true);
-    try {
-      const [payData, invData] = await Promise.all([
-        apiRequest('/api/payments'),
-        apiRequest('/api/invoices'),
-      ]);
-      setPayments(payData || []);
-      setInvoices(invData || []);
-    } catch (err) {
-      toast.error('Failed to load payments ledger', 'Error');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const invoiceIdFilter = searchParams.get('invoice_id') || '';
+  const searchQuery = searchParams.get('q') || '';
+  const page = parseInt(searchParams.get('page') || '1', 10);
+  const pageSize = 15;
 
-  useEffect(() => {
-    fetchPaymentsAndInvoices();
-  }, []);
-
-  const handleOpenRecordModal = () => {
-    // Pick the first unpaid invoice as default
-    const unpaid = invoices.find((inv) => inv.amount_due > 0 || inv.status !== 'Paid');
-    if (!unpaid) {
-      toast.info('All current invoices are already settled! Showing latest invoice.');
-      setSelectedInvoice(invoices[0] || null);
-    } else {
-      setSelectedInvoice(unpaid);
-    }
-    setIsRecordModalOpen(true);
-  };
-
-  const filteredPayments = payments.filter((p) => {
-    const invNum = p.invoice_id?.invoice_number || '';
-    const note = p.notes || '';
-    const method = p.method || '';
-    const q = searchQuery.toLowerCase();
-    return invNum.toLowerCase().includes(q) || note.toLowerCase().includes(q) || method.toLowerCase().includes(q);
+  // 1. Fetch Payments
+  const { data: payments = [], isLoading } = useQuery({
+    queryKey: ['payments-list', invoiceIdFilter],
+    queryFn: async () => {
+      const q = invoiceIdFilter ? `?invoice_id=${invoiceIdFilter}` : '';
+      const res = await api.get(`/api/payments${q}`);
+      return Array.isArray(res) ? res : res?.data || [];
+    },
   });
 
-  const totalCollected = payments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+  // 2. Fetch Invoices for recording payment
+  const { data: invoices = [] } = useQuery({
+    queryKey: ['invoices-options'],
+    queryFn: async () => {
+      const res = await api.get('/api/invoices');
+      return Array.isArray(res) ? res : res?.data || [];
+    },
+  });
 
-  const columns = [
-    {
-      header: 'Payment Ref',
-      key: '_id',
-      sortable: true,
-      render: (row) => (
-        <span className="font-num text-xs font-medium text-[var(--color-ink)]">
-          {truncateId(row._id, 8, 4)}
-        </span>
-      ),
-    },
-    {
-      header: 'Invoice #',
-      key: 'invoice',
-      render: (row) => (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            if (row.invoice_id?._id || row.invoice_id) {
-              navigate(`/invoices/${row.invoice_id._id || row.invoice_id}`);
-            }
-          }}
-          className="font-num font-semibold text-xs text-[#0D4A38] dark:text-[#15805D] hover:underline"
-        >
-          {row.invoice_id?.invoice_number || 'Direct Ledger Credit'}
-        </button>
-      ),
-    },
-    {
-      header: 'Method',
-      key: 'method',
-      sortable: true,
-      render: (row) => (
-        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-[var(--color-canvas-subtle)] border border-[var(--color-border)] text-xs font-medium">
-          <CreditCard className="w-3 h-3 text-[var(--color-ink-muted)]" />
-          {row.method}
-        </span>
-      ),
-    },
-    {
-      header: 'Date Settled',
-      key: 'payment_date',
-      sortable: true,
-      render: (row) => <DateText date={row.payment_date} format="medium" />,
-    },
-    {
-      header: 'Reference Note',
-      key: 'notes',
-      render: (row) => (
-        <span className="text-[var(--color-ink-muted)] truncate max-w-xs block">
-          {row.notes || '—'}
-        </span>
-      ),
-    },
-    {
-      header: 'Settled Amount',
-      key: 'amount',
-      sortable: true,
-      render: (row) => (
-        <span className="font-semibold text-right block text-[#15805D] font-num">
-          +<MoneyText amount={row.amount} />
-        </span>
-      ),
-    },
-  ];
+  const handleCopy = (id, e) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(id);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 1500);
+  };
+
+  const handleOpenRecord = () => {
+    // Default to invoice filter or first confirmed invoice with amount due
+    const unpaid = invoices.find((i) => i.status === 'Confirmed' && (i.amount_due > 0 || i.amount_due === undefined));
+    setSelectedInvoice(unpaid || invoices[0] || null);
+    setIsRecordOpen(true);
+  };
+
+  const filtered = useMemo(() => {
+    return payments.filter((p) => {
+      const q = searchQuery.toLowerCase();
+      const invNum = p.invoice_id?.invoice_number || '';
+      const method = p.method || '';
+      const notes = p.notes || '';
+      return !q || invNum.toLowerCase().includes(q) || method.toLowerCase().includes(q) || notes.toLowerCase().includes(q);
+    });
+  }, [payments, searchQuery]);
+
+  const totalPages = Math.ceil(filtered.length / pageSize) || 1;
+  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-200">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-6 text-[var(--color-ink)]">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[var(--color-border)]">
         <div>
-          <h1 className="font-serif-display text-2xl md:text-3xl font-medium tracking-tight text-[var(--color-ink)]">
+          <h1 className="font-serif-display text-3xl font-normal tracking-tight">
             Payment Reconciliation Ledger
           </h1>
-          <p className="text-xs text-[var(--color-ink-muted)] mt-1">
-            Tracks incoming cash flows, automatic status promotions to Paid, and transaction records.
+          <p className="text-xs text-[var(--color-ink-muted)] font-mono mt-0.5">
+            Real cash inflows, partial settlements, and verified ledger postings.
           </p>
         </div>
 
-        <Button onClick={handleOpenRecordModal} icon={Plus}>
-          Record Payment
-        </Button>
+        {role !== 'customer' && (
+          <Button variant="primary" onClick={handleOpenRecord} icon={Plus}>
+            Record Payment
+          </Button>
+        )}
       </div>
 
-      {/* Summary KPI Strip */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="p-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
-          <span className="text-xs font-medium text-[var(--color-ink-muted)] uppercase tracking-wider">
-            Total Reconciled
+      {/* Invoice Filter Badge if filtered by invoice */}
+      {invoiceIdFilter && (
+        <div className="p-2.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] flex items-center justify-between text-xs">
+          <span className="font-mono text-[var(--color-ink-muted)]">
+            Filtered by Invoice ID: <strong className="text-[var(--color-ink)]">{invoiceIdFilter}</strong>
           </span>
-          <div className="font-num text-2xl font-semibold text-[var(--color-ink)] mt-1">
-            <MoneyText amount={totalCollected} />
-          </div>
+          <button
+            onClick={() => {
+              const p = new URLSearchParams(searchParams);
+              p.delete('invoice_id');
+              setSearchParams(p);
+            }}
+            className="text-[var(--color-accent)] font-semibold hover:underline"
+          >
+            Clear Filter
+          </button>
         </div>
-
-        <div className="p-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
-          <span className="text-xs font-medium text-[var(--color-ink-muted)] uppercase tracking-wider">
-            Reconciled Transactions
-          </span>
-          <div className="font-num text-2xl font-semibold text-[var(--color-ink)] mt-1">
-            {payments.length}
-          </div>
-        </div>
-
-        <div className="p-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
-          <span className="text-xs font-medium text-[var(--color-ink-muted)] uppercase tracking-wider">
-            Settlement Status
-          </span>
-          <div className="flex items-center gap-1.5 text-xs font-medium text-[#15805D] mt-2">
-            <CheckCircle2 className="w-4 h-4" />
-            <span>MongoDB Ledger Synced</span>
-          </div>
-        </div>
-      </div>
+      )}
 
       {/* Search Input */}
-      <div className="flex justify-end">
-        <div className="relative w-full md:w-64">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-ink-faint)] pointer-events-none" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search payments..."
-            className="w-full h-8 pl-8 pr-3 text-xs rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] placeholder:text-[var(--color-ink-faint)] focus:outline-none focus:border-[#0D4A38] dark:focus:border-[#15805D]"
-          />
-        </div>
+      <div className="relative w-full md:w-80">
+        <Search className="w-3.5 h-3.5 text-[var(--color-ink-muted)] absolute left-3 top-1/2 -translate-y-1/2" />
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => {
+            const p = new URLSearchParams(searchParams);
+            if (e.target.value) p.set('q', e.target.value);
+            else p.delete('q');
+            p.set('page', '1');
+            setSearchParams(p);
+          }}
+          placeholder="Search by invoice #, method, or note..."
+          className="w-full pl-9 pr-3 py-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] text-xs text-[var(--color-ink)] placeholder-[var(--color-ink-faint)] focus:outline-hidden focus:border-[var(--color-accent)]"
+        />
       </div>
 
-      {/* Data Table */}
-      <DataTable
-        columns={columns}
-        data={filteredPayments}
-        loading={loading}
-        emptyTitle="No payments recorded"
-        emptyDescription="Record manual wire, check, or credit card settlements to reconcile invoices."
-      />
+      {/* Ruled Dense Table */}
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl overflow-hidden shadow-2xs">
+        {isLoading ? (
+          <div className="p-8 text-center text-xs text-[var(--color-ink-muted)] font-mono">
+            Loading payments ledger...
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="p-12 text-center text-xs text-[var(--color-ink-muted)]">
+            No payment settlements found in this ledger query.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-[var(--color-canvas)] border-b border-[var(--color-border)] font-mono uppercase text-[10px] text-[var(--color-ink-muted)]">
+                <tr>
+                  <th className="py-2.5 px-6">Invoice #</th>
+                  <th className="py-2.5 px-4">Settlement Date</th>
+                  <th className="py-2.5 px-4">Payment Method</th>
+                  <th className="py-2.5 px-4">Reference Notes</th>
+                  <th className="py-2.5 px-6 text-right">Amount Settled</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--color-border)] font-num">
+                {paginated.map((pay) => (
+                  <tr key={pay._id} className="hover:bg-[var(--color-surface-hover)] transition-colors">
+                    <td className="py-3 px-6">
+                      <div className="font-semibold text-[var(--color-ink)]">
+                        {pay.invoice_id?.invoice_number ? (
+                          <Link
+                            to={`/app/invoices/${pay.invoice_id._id || pay.invoice_id}`}
+                            className="hover:text-[var(--color-accent)] hover:underline inline-flex items-center gap-1 font-mono"
+                          >
+                            {pay.invoice_id.invoice_number} <ExternalLink className="w-3 h-3" />
+                          </Link>
+                        ) : (
+                          <span className="font-mono text-[var(--color-ink-muted)]">Settlement Ref</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[10px] text-[var(--color-ink-faint)] font-mono">
+                        <span>{pay._id.slice(-8)}</span>
+                        <button onClick={(e) => handleCopy(pay._id, e)} className="hover:text-[var(--color-ink)]">
+                          {copiedId === pay._id ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      </div>
+                    </td>
+
+                    <td className="py-3 px-4 text-[var(--color-ink)] font-mono">
+                      {formatDate(pay.payment_date || pay.createdAt, 'short')}
+                    </td>
+
+                    <td className="py-3 px-4 font-ui">
+                      <span className="font-medium text-[var(--color-ink)]">{pay.method}</span>
+                    </td>
+
+                    <td className="py-3 px-4 font-ui text-[var(--color-ink-muted)] truncate max-w-[200px]">
+                      {pay.notes || '—'}
+                    </td>
+
+                    <td className="py-3 px-6 text-right font-bold text-emerald-700 dark:text-emerald-400">
+                      <MoneyText amount={pay.amount} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {totalPages > 1 && (
+          <div className="p-3 px-6 border-t border-[var(--color-border)] bg-[var(--color-canvas)] flex items-center justify-between text-xs font-mono text-[var(--color-ink-muted)]">
+            <span>
+              Page {page} of {totalPages} ({filtered.length} total payments)
+            </span>
+            <div className="flex gap-1">
+              <button
+                disabled={page <= 1}
+                onClick={() => {
+                  const p = new URLSearchParams(searchParams);
+                  p.set('page', String(page - 1));
+                  setSearchParams(p);
+                }}
+                className="px-2.5 py-1 rounded border border-[var(--color-border)] bg-[var(--color-surface)] disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <button
+                disabled={page >= totalPages}
+                onClick={() => {
+                  const p = new URLSearchParams(searchParams);
+                  p.set('page', String(page + 1));
+                  setSearchParams(p);
+                }}
+                className="px-2.5 py-1 rounded border border-[var(--color-border)] bg-[var(--color-surface)] disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Record Payment Dialog */}
       {selectedInvoice && (
         <RecordPaymentDialog
-          open={isRecordModalOpen}
-          onClose={() => setIsRecordModalOpen(false)}
+          open={isRecordOpen}
+          onClose={() => setIsRecordOpen(false)}
           invoice={selectedInvoice}
-          onPaymentRecorded={() => fetchPaymentsAndInvoices()}
+          onSuccess={() => {
+            queryClient.invalidateQueries({ queryKey: ['payments-list'] });
+            queryClient.invalidateQueries({ queryKey: ['invoices-options'] });
+            queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
+          }}
         />
       )}
     </div>
   );
 }
-

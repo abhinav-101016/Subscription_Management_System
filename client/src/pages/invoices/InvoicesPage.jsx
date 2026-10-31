@@ -1,199 +1,239 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Search, Filter, Receipt, FileText } from 'lucide-react';
-import { apiRequest } from '../../lib/apiClient';
-import { DataTable } from '../../components/ui/DataTable';
-import { Button } from '../../components/ui/Button';
+import React, { useMemo, useState } from 'react';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { Search, Copy, Check, ExternalLink, Printer } from 'lucide-react';
+import { api } from '../../lib/apiClient';
 import { StatusPill } from '../../components/ui/StatusPill';
 import { MoneyText } from '../../components/ui/MoneyText';
-import { DateText } from '../../components/ui/DateText';
-import { truncateId, cn } from '../../lib/utils';
-import { useToast } from '../../hooks/useToast';
+import { cn, formatDate } from '../../lib/utils';
+import { useAuth } from '../../features/auth/AuthContext';
 
 export default function InvoicesPage() {
-  const [invoices, setInvoices] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get('tab') || 'all'; // 'all' | 'outstanding' | 'paid'
-  const [searchQuery, setSearchQuery] = useState('');
+  const [copiedId, setCopiedId] = useState(null);
   const navigate = useNavigate();
-  const toast = useToast();
+  const { role } = useAuth();
 
-  const fetchInvoices = async () => {
-    setLoading(true);
-    try {
-      const data = await apiRequest('/api/invoices');
-      setInvoices(data || []);
-    } catch (err) {
-      toast.error('Unable to fetch invoices', 'Error');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const tab = searchParams.get('tab') || 'all'; // 'all' | 'outstanding' | 'paid'
+  const searchQuery = searchParams.get('q') || '';
+  const page = parseInt(searchParams.get('page') || '1', 10);
+  const pageSize = 15;
 
-  useEffect(() => {
-    fetchInvoices();
-  }, []);
-
-  const handleTabChange = (tab) => {
-    setSearchParams({ tab });
-  };
-
-  const filteredInvoices = invoices.filter((inv) => {
-    // Tab filtering
-    if (activeTab === 'outstanding') {
-      if (inv.status === 'Paid' || (inv.amount_due !== undefined && inv.amount_due <= 0)) {
-        return false;
-      }
-    } else if (activeTab === 'paid') {
-      if (inv.status !== 'Paid' && inv.amount_due > 0) {
-        return false;
-      }
-    }
-
-    // Search query filtering
-    const invNum = inv.invoice_number || '';
-    const custName = inv.customer_id?.name || '';
-    const query = searchQuery.toLowerCase();
-    return invNum.toLowerCase().includes(query) || custName.toLowerCase().includes(query);
+  const { data: invoices = [], isLoading } = useQuery({
+    queryKey: ['invoices-list', tab],
+    queryFn: async () => {
+      const endpoint = tab === 'outstanding' ? '/api/invoices/outstanding' : '/api/invoices';
+      const res = await api.get(endpoint);
+      return Array.isArray(res) ? res : res?.data || [];
+    },
   });
 
-  const columns = [
-    {
-      header: 'Invoice #',
-      key: 'invoice_number',
-      sortable: true,
-      render: (row) => (
-        <span className="font-num font-semibold text-xs text-[var(--color-ink)]">
-          {row.invoice_number}
-        </span>
-      ),
-    },
-    {
-      header: 'Customer',
-      key: 'customer',
-      sortable: true,
-      render: (row) => (
-        <div>
-          <div className="font-medium text-[var(--color-ink)]">
-            {row.customer_id?.name || 'Customer Record'}
-          </div>
-          <div className="text-[11px] text-[var(--color-ink-muted)]">
-            {row.customer_id?.email || '—'}
-          </div>
-        </div>
-      ),
-    },
-    {
-      header: 'Status',
-      key: 'status',
-      sortable: true,
-      render: (row) => <StatusPill status={row.status} />,
-    },
-    {
-      header: 'Issue Date',
-      key: 'issue_date',
-      sortable: true,
-      render: (row) => <DateText date={row.issue_date || row.createdAt} format="short" />,
-    },
-    {
-      header: 'Due Date',
-      key: 'due_date',
-      sortable: true,
-      render: (row) => {
-        const isPastDue = row.due_date && new Date(row.due_date) < new Date() && row.status !== 'Paid';
-        return (
-          <span className={cn(isPastDue && 'text-[#B91C1C] font-semibold')}>
-            <DateText date={row.due_date} format="short" />
-          </span>
-        );
-      },
-    },
-    {
-      header: 'Grand Total',
-      key: 'grand_total',
-      sortable: true,
-      render: (row) => (
-        <span className="font-semibold text-right block">
-          <MoneyText amount={row.grand_total} />
-        </span>
-      ),
-    },
-    {
-      header: 'Amount Due',
-      key: 'amount_due',
-      sortable: true,
-      render: (row) => (
-        <span
-          className={cn(
-            'font-semibold text-right block font-num',
-            row.amount_due > 0 ? 'text-[#B91C1C]' : 'text-[#15805D]'
-          )}
-        >
-          <MoneyText amount={row.amount_due ?? 0} />
-        </span>
-      ),
-    },
-  ];
+  const setTab = (newTab) => {
+    const p = new URLSearchParams(searchParams);
+    p.set('tab', newTab);
+    p.set('page', '1');
+    setSearchParams(p);
+  };
+
+  const handleSearchChange = (val) => {
+    const p = new URLSearchParams(searchParams);
+    if (val) p.set('q', val);
+    else p.delete('q');
+    p.set('page', '1');
+    setSearchParams(p);
+  };
+
+  const handleCopy = (id, e) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(id);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 1500);
+  };
+
+  const filtered = useMemo(() => {
+    return invoices.filter((inv) => {
+      if (tab === 'paid' && inv.status !== 'Paid') return false;
+
+      const q = searchQuery.toLowerCase();
+      const num = inv.invoice_number || '';
+      const cust = inv.customer_id?.name || inv.customer_id?.email || '';
+      const subNum = inv.subscription_id?.subscription_number || '';
+
+      return !q || num.toLowerCase().includes(q) || cust.toLowerCase().includes(q) || subNum.toLowerCase().includes(q);
+    });
+  }, [invoices, tab, searchQuery]);
+
+  const totalPages = Math.ceil(filtered.length / pageSize) || 1;
+  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
+
+  const getDetailLink = (id) => {
+    return role === 'customer' ? `/app/portal/invoices/${id}` : `/app/invoices/${id}`;
+  };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-200">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-6 text-[var(--color-ink)]">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[var(--color-border)]">
         <div>
-          <h1 className="font-serif-display text-2xl md:text-3xl font-medium tracking-tight text-[var(--color-ink)]">
+          <h1 className="font-serif-display text-3xl font-normal tracking-tight">
             Invoices & Billing Statements
           </h1>
-          <p className="text-xs text-[var(--color-ink-muted)] mt-1">
-            Reconcile payments, track outstanding receivables, and print formal tax invoices.
+          <p className="text-xs text-[var(--color-ink-muted)] font-mono mt-0.5">
+            Billed cycle statements, balances due, and settlement progression.
           </p>
         </div>
       </div>
 
       {/* Tabs & Search */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-2">
-        <div className="inline-flex items-center gap-1 p-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="inline-flex rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-1 text-xs">
           {[
             { id: 'all', label: 'All Invoices' },
-            { id: 'outstanding', label: 'Outstanding / Due' },
-            { id: 'paid', label: 'Settled & Paid' },
-          ].map((tab) => (
+            { id: 'outstanding', label: 'Outstanding / Overdue' },
+            { id: 'paid', label: 'Paid & Settled' },
+          ].map((t) => (
             <button
-              key={tab.id}
-              onClick={() => handleTabChange(tab.id)}
+              key={t.id}
+              onClick={() => setTab(t.id)}
               className={cn(
-                'px-3 py-1 text-xs font-medium rounded-md whitespace-nowrap transition-colors',
-                activeTab === tab.id
-                  ? 'bg-[var(--color-canvas-subtle)] text-[var(--color-ink)] font-semibold shadow-2xs'
-                  : 'text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]'
+                'px-3 py-1 rounded text-xs font-mono font-medium transition-colors',
+                tab === t.id
+                  ? 'bg-[var(--color-ink)] text-[var(--color-canvas)] shadow-2xs'
+                  : 'text-[var(--color-ink-muted)] hover:text-[var(--color-ink)] hover:bg-[var(--color-surface-hover)]'
               )}
             >
-              {tab.label}
+              {t.label}
             </button>
           ))}
         </div>
 
-        <div className="relative w-full md:w-64">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-ink-faint)] pointer-events-none" />
+        <div className="relative w-full md:w-72">
+          <Search className="w-3.5 h-3.5 text-[var(--color-ink-muted)] absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search invoice # or customer..."
-            className="w-full h-8 pl-8 pr-3 text-xs rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] placeholder:text-[var(--color-ink-faint)] focus:outline-none focus:border-[#0D4A38] dark:focus:border-[#15805D]"
+            onChange={(e) => handleSearchChange(e.target.value)}
+            placeholder="Search invoice #, customer..."
+            className="w-full pl-9 pr-3 py-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] text-xs text-[var(--color-ink)] placeholder-[var(--color-ink-faint)] focus:outline-hidden focus:border-[var(--color-accent)]"
           />
         </div>
       </div>
 
-      {/* Invoices Data Table */}
-      <DataTable
-        columns={columns}
-        data={filteredInvoices}
-        loading={loading}
-        onRowClick={(row) => navigate(`/invoices/${row._id}`)}
-        emptyTitle="No invoices matching view"
-        emptyDescription="Invoices will be automatically billed on cycle or when subscriptions transition."
-      />
+      {/* Table */}
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl overflow-hidden shadow-2xs">
+        {isLoading ? (
+          <div className="p-8 text-center text-xs text-[var(--color-ink-muted)] font-mono">
+            Loading statements ledger...
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="p-12 text-center text-xs text-[var(--color-ink-muted)]">
+            No invoices found in this view.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-[var(--color-canvas)] border-b border-[var(--color-border)] font-mono uppercase text-[10px] text-[var(--color-ink-muted)]">
+                <tr>
+                  <th className="py-2.5 px-6">Invoice Number</th>
+                  <th className="py-2.5 px-4">Customer Account</th>
+                  <th className="py-2.5 px-4">Status</th>
+                  <th className="py-2.5 px-4">Period / Due Date</th>
+                  <th className="py-2.5 px-4 text-right">Grand Total</th>
+                  <th className="py-2.5 px-4 text-right">Amount Due</th>
+                  <th className="py-2.5 px-6 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--color-border)] font-num">
+                {paginated.map((inv) => (
+                  <tr
+                    key={inv._id}
+                    onClick={() => navigate(getDetailLink(inv._id))}
+                    className="hover:bg-[var(--color-surface-hover)] cursor-pointer transition-colors group"
+                  >
+                    <td className="py-3 px-6">
+                      <div className="font-semibold text-[var(--color-ink)] group-hover:text-[var(--color-accent)] transition-colors">
+                        {inv.invoice_number}
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[10px] text-[var(--color-ink-faint)] font-mono">
+                        <span>{inv._id.slice(-8)}</span>
+                        <button onClick={(e) => handleCopy(inv._id, e)} className="hover:text-[var(--color-ink)]">
+                          {copiedId === inv._id ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      </div>
+                    </td>
+
+                    <td className="py-3 px-4 font-ui">
+                      <span className="font-medium text-[var(--color-ink)] block truncate max-w-[150px]">
+                        {inv.customer_id?.name || 'Customer Account'}
+                      </span>
+                      <span className="text-[10px] font-mono text-[var(--color-ink-faint)] block truncate max-w-[150px]">
+                        {inv.customer_id?.email || '—'}
+                      </span>
+                    </td>
+
+                    <td className="py-3 px-4">
+                      <StatusPill status={inv.status} />
+                    </td>
+
+                    <td className="py-3 px-4 text-[11px] font-mono text-[var(--color-ink-muted)] font-ui">
+                      <div>Due: {formatDate(inv.due_date || inv.billing_period_end, 'short')}</div>
+                      <span className="text-[10px] text-[var(--color-ink-faint)] font-mono">
+                        Cycle: {formatDate(inv.billing_period_start, 'short')}
+                      </span>
+                    </td>
+
+                    <td className="py-3 px-4 text-right font-medium text-[var(--color-ink)]">
+                      <MoneyText amount={inv.grand_total} />
+                    </td>
+
+                    <td className="py-3 px-4 text-right font-bold text-[var(--color-accent)]">
+                      <MoneyText amount={inv.amount_due ?? inv.grand_total} />
+                    </td>
+
+                    <td className="py-3 px-6 text-right font-ui">
+                      <span className="text-xs text-[var(--color-accent)] group-hover:underline font-medium inline-flex items-center gap-1">
+                        View <ExternalLink className="w-3 h-3" />
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {totalPages > 1 && (
+          <div className="p-3 px-6 border-t border-[var(--color-border)] bg-[var(--color-canvas)] flex items-center justify-between text-xs font-mono text-[var(--color-ink-muted)]">
+            <span>
+              Page {page} of {totalPages} ({filtered.length} total invoices)
+            </span>
+            <div className="flex gap-1">
+              <button
+                disabled={page <= 1}
+                onClick={() => {
+                  const p = new URLSearchParams(searchParams);
+                  p.set('page', String(page - 1));
+                  setSearchParams(p);
+                }}
+                className="px-2.5 py-1 rounded border border-[var(--color-border)] bg-[var(--color-surface)] disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <button
+                disabled={page >= totalPages}
+                onClick={() => {
+                  const p = new URLSearchParams(searchParams);
+                  p.set('page', String(page + 1));
+                  setSearchParams(p);
+                }}
+                className="px-2.5 py-1 rounded border border-[var(--color-border)] bg-[var(--color-surface)] disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
-

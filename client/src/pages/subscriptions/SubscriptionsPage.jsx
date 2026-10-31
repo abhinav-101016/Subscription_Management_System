@@ -1,165 +1,141 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Plus, Search, Filter } from 'lucide-react';
-import { apiRequest } from '../../lib/apiClient';
-import { DataTable } from '../../components/ui/DataTable';
+import React, { useState, useMemo } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Plus, Search, Copy, Check, ExternalLink } from 'lucide-react';
+import { api } from '../../lib/apiClient';
 import { Button } from '../../components/ui/Button';
 import { StatusPill } from '../../components/ui/StatusPill';
-import { DateText } from '../../components/ui/DateText';
 import { MoneyText } from '../../components/ui/MoneyText';
 import { SubscriptionDrawer } from './SubscriptionDrawer';
-import { truncateId, cn } from '../../lib/utils';
+import { cn, formatDate } from '../../lib/utils';
 import { useToast } from '../../hooks/useToast';
 
 export default function SubscriptionsPage() {
-  const [subscriptions, setSubscriptions] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState('ALL');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchParams, setSearchParams] = useSearchParams();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [copiedId, setCopiedId] = useState(null);
   const navigate = useNavigate();
   const toast = useToast();
+  const queryClient = useQueryClient();
 
-  const fetchSubscriptions = async () => {
-    setLoading(true);
-    try {
-      const data = await apiRequest('/api/subscriptions');
-      setSubscriptions(data || []);
-    } catch (err) {
-      toast.error('Unable to retrieve subscriptions', 'Fetch Error');
-    } finally {
-      setLoading(false);
+  const statusTab = searchParams.get('status') || 'ALL';
+  const searchQuery = searchParams.get('q') || '';
+  const page = parseInt(searchParams.get('page') || '1', 10);
+  const pageSize = 15;
+
+  const { data: subscriptions = [], isLoading, error } = useQuery({
+    queryKey: ['subscriptions-list'],
+    queryFn: async () => {
+      const res = await api.get('/api/subscriptions');
+      return Array.isArray(res) ? res : res?.data || [];
+    },
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async (payload) => {
+      return await api.post('/api/subscriptions', payload);
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['subscriptions-list'] });
+      toast.success('Contract created in Draft status');
+      const targetId = data?._id || data?.data?._id || data?.id;
+      if (targetId) {
+        navigate(`/app/subscriptions/${targetId}`);
+      }
+    },
+    onError: (err) => {
+      toast.error(err.message || 'Failed to create subscription contract');
+    },
+  });
+
+  const setStatusTab = (tab) => {
+    const params = new URLSearchParams(searchParams);
+    if (tab === 'ALL') {
+      params.delete('status');
+    } else {
+      params.set('status', tab);
     }
+    params.set('page', '1');
+    setSearchParams(params);
   };
 
-  useEffect(() => {
-    fetchSubscriptions();
-  }, []);
+  const handleSearchChange = (val) => {
+    const params = new URLSearchParams(searchParams);
+    if (val) {
+      params.set('q', val);
+    } else {
+      params.delete('q');
+    }
+    params.set('page', '1');
+    setSearchParams(params);
+  };
 
-  const handleCreateSubscription = async (payload) => {
-    const created = await apiRequest('/api/subscriptions', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-    setSubscriptions([created, ...subscriptions]);
-    navigate(`/subscriptions/${created._id}`);
+  const handleCopy = (id, e) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(id);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 1500);
   };
 
   // Filter subscriptions
-  const filteredSubscriptions = subscriptions.filter((sub) => {
-    const matchesStatus =
-      statusFilter === 'ALL' ||
-      (sub.status || '').toLowerCase() === statusFilter.toLowerCase();
+  const filtered = useMemo(() => {
+    return subscriptions.filter((sub) => {
+      const matchStatus =
+        statusTab === 'ALL' || (sub.status || '').toLowerCase() === statusTab.toLowerCase();
 
-    const customerName = sub.customer_id?.name || '';
-    const subId = sub._id || '';
-    const planName = sub.plan_id?.name || '';
+      const q = searchQuery.toLowerCase();
+      const customerName = sub.customer_id?.name || '';
+      const customerEmail = sub.customer_id?.email || '';
+      const subNum = sub.subscription_number || '';
+      const planName = sub.plan_id?.name || '';
 
-    const matchesSearch =
-      customerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      subId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      planName.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchQuery =
+        !q ||
+        customerName.toLowerCase().includes(q) ||
+        customerEmail.toLowerCase().includes(q) ||
+        subNum.toLowerCase().includes(q) ||
+        planName.toLowerCase().includes(q);
 
-    return matchesStatus && matchesSearch;
-  });
+      return matchStatus && matchQuery;
+    });
+  }, [subscriptions, statusTab, searchQuery]);
 
-  const columns = [
-    {
-      header: 'Subscription Ref',
-      key: '_id',
-      sortable: true,
-      render: (row) => (
-        <span className="font-num text-[11px] font-medium text-[var(--color-ink)]">
-          {truncateId(row._id, 8, 4)}
-        </span>
-      ),
-    },
-    {
-      header: 'Customer',
-      key: 'customer',
-      sortable: true,
-      render: (row) => (
-        <div>
-          <div className="font-medium text-[var(--color-ink)]">
-            {row.customer_id?.name || 'Customer Record'}
-          </div>
-          <div className="text-[11px] text-[var(--color-ink-muted)]">
-            {row.customer_id?.email || '—'}
-          </div>
-        </div>
-      ),
-    },
-    {
-      header: 'Plan & Billing',
-      key: 'plan',
-      render: (row) => (
-        <div>
-          <div className="font-medium text-[var(--color-ink)]">
-            {row.plan_id?.name || 'Standard Plan'}
-          </div>
-          <div className="text-[11px] text-[var(--color-ink-faint)]">
-            {row.plan_id?.billing_frequency || 'Monthly'} • Next:{' '}
-            <DateText date={row.next_billing_date} format="short" />
-          </div>
-        </div>
-      ),
-    },
-    {
-      header: 'Status',
-      key: 'status',
-      sortable: true,
-      render: (row) => <StatusPill status={row.status} />,
-    },
-    {
-      header: 'Lines',
-      key: 'lines',
-      render: (row) => (
-        <span className="font-num text-[var(--color-ink-muted)]">
-          {row.lines?.length || 1} line item{row.lines?.length > 1 ? 's' : ''}
-        </span>
-      ),
-    },
-    {
-      header: 'Start Date',
-      key: 'start_date',
-      sortable: true,
-      render: (row) => <DateText date={row.start_date} format="short" />,
-    },
-  ];
-
-  const statusTabs = ['ALL', 'Draft', 'Quotation', 'Confirmed', 'Active', 'Closed'];
+  const totalPages = Math.ceil(filtered.length / pageSize) || 1;
+  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-200">
-      {/* Page Title & Action */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-6 text-[var(--color-ink)]">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[var(--color-border)]">
         <div>
-          <h1 className="font-serif-display text-2xl md:text-3xl font-medium tracking-tight text-[var(--color-ink)]">
+          <h1 className="font-serif-display text-3xl font-normal tracking-tight">
             Subscription Contracts
           </h1>
-          <p className="text-xs text-[var(--color-ink-muted)] mt-1">
-            State-machine enforced lifecycle: Draft → Quotation → Confirmed → Active → Closed.
+          <p className="text-xs text-[var(--color-ink-muted)] font-mono mt-0.5">
+            Recurring contract lifecycle, state progression, and billing triggers.
           </p>
         </div>
 
-        <Button onClick={() => setIsDrawerOpen(true)} icon={Plus}>
-          New Subscription
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button variant="primary" onClick={() => setIsDrawerOpen(true)} icon={Plus}>
+            New Contract
+          </Button>
+        </div>
       </div>
 
-      {/* Filter and Search Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-2">
-        {/* Status Filter Tabs */}
-        <div className="flex items-center gap-1 overflow-x-auto p-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
-          {statusTabs.map((tab) => (
+      {/* Filter Tabs & Search Bar */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        {/* Status Tabs */}
+        <div className="inline-flex rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] p-1 text-xs overflow-x-auto">
+          {['ALL', 'Draft', 'Quotation', 'Confirmed', 'Active', 'Closed'].map((tab) => (
             <button
               key={tab}
-              onClick={() => setStatusFilter(tab)}
+              onClick={() => setStatusTab(tab)}
               className={cn(
-                'px-3 py-1 text-xs font-medium rounded-md whitespace-nowrap transition-colors',
-                statusFilter === tab
-                  ? 'bg-[var(--color-canvas-subtle)] text-[var(--color-ink)] font-semibold shadow-2xs'
-                  : 'text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]'
+                'px-3 py-1 rounded text-xs font-mono font-medium transition-colors whitespace-nowrap',
+                statusTab === tab
+                  ? 'bg-[var(--color-ink)] text-[var(--color-canvas)] shadow-2xs'
+                  : 'text-[var(--color-ink-muted)] hover:text-[var(--color-ink)] hover:bg-[var(--color-surface-hover)]'
               )}
             >
               {tab}
@@ -167,36 +143,159 @@ export default function SubscriptionsPage() {
           ))}
         </div>
 
-        {/* Search Input */}
-        <div className="relative w-full md:w-64">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-ink-faint)] pointer-events-none" />
+        {/* Search */}
+        <div className="relative w-full md:w-72">
+          <Search className="w-3.5 h-3.5 text-[var(--color-ink-muted)] absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search subscriptions..."
-            className="w-full h-8 pl-8 pr-3 text-xs rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] placeholder:text-[var(--color-ink-faint)] focus:outline-none focus:border-[#0D4A38] dark:focus:border-[#15805D]"
+            onChange={(e) => handleSearchChange(e.target.value)}
+            placeholder="Search by contract #, customer, plan..."
+            className="w-full pl-9 pr-3 py-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] text-xs text-[var(--color-ink)] placeholder-[var(--color-ink-faint)] focus:outline-hidden focus:border-[var(--color-accent)]"
           />
         </div>
       </div>
 
-      {/* Data Table */}
-      <DataTable
-        columns={columns}
-        data={filteredSubscriptions}
-        loading={loading}
-        onRowClick={(row) => navigate(`/subscriptions/${row._id}`)}
-        emptyTitle="No subscriptions matching filter"
-        emptyDescription="Create your first contract draft to initiate the state machine."
-      />
+      {/* Ruled Dense Table */}
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl overflow-hidden shadow-2xs">
+        {isLoading ? (
+          <div className="p-8 text-center text-xs text-[var(--color-ink-muted)] font-mono">
+            Loading recurring contract ledger...
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="p-12 text-center space-y-3">
+            <p className="text-xs text-[var(--color-ink-muted)]">
+              No subscription contracts match the selected status filter or query.
+            </p>
+            <Button variant="secondary" size="xs" onClick={() => setIsDrawerOpen(true)}>
+              Initialize First Contract
+            </Button>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-[var(--color-canvas)] border-b border-[var(--color-border)] font-mono uppercase text-[10px] text-[var(--color-ink-muted)]">
+                <tr>
+                  <th className="py-2.5 px-6">Contract Number</th>
+                  <th className="py-2.5 px-4">Customer Account</th>
+                  <th className="py-2.5 px-4">Plan & Frequency</th>
+                  <th className="py-2.5 px-4">Status</th>
+                  <th className="py-2.5 px-4">Start Date</th>
+                  <th className="py-2.5 px-4 text-right">Lines</th>
+                  <th className="py-2.5 px-6 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--color-border)]">
+                {paginated.map((sub) => {
+                  const lineCount = sub.lines?.length || 0;
+                  return (
+                    <tr
+                      key={sub._id}
+                      onClick={() => navigate(`/app/subscriptions/${sub._id}`)}
+                      className="hover:bg-[var(--color-surface-hover)] cursor-pointer transition-colors group"
+                    >
+                      {/* Contract Number as Primary Label */}
+                      <td className="py-3 px-6">
+                        <div className="font-mono font-semibold text-[var(--color-ink)] group-hover:text-[var(--color-accent)] transition-colors">
+                          {sub.subscription_number || 'SUB-DRAFT'}
+                        </div>
+                        <div className="flex items-center gap-1.5 text-[10px] font-mono text-[var(--color-ink-faint)]">
+                          <span>{sub._id.slice(-8)}</span>
+                          <button
+                            onClick={(e) => handleCopy(sub._id, e)}
+                            title="Copy ObjectId"
+                            className="hover:text-[var(--color-ink)]"
+                          >
+                            {copiedId === sub._id ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                          </button>
+                        </div>
+                      </td>
 
-      {/* Subscription Drawer Modal */}
+                      <td className="py-3 px-4">
+                        <div className="font-medium truncate max-w-[160px] text-[var(--color-ink)]">
+                          {sub.customer_id?.name || 'Customer Account'}
+                        </div>
+                        <div className="text-[10px] text-[var(--color-ink-faint)] font-mono truncate max-w-[160px]">
+                          {sub.customer_id?.email || '—'}
+                        </div>
+                      </td>
+
+                      <td className="py-3 px-4">
+                        <div className="font-medium text-[var(--color-ink)]">
+                          {sub.plan_id?.name || 'Standard Plan'}
+                        </div>
+                        <span className="text-[10px] font-mono text-[var(--color-ink-muted)]">
+                          {sub.plan_id?.billing_frequency || 'Monthly'}
+                        </span>
+                      </td>
+
+                      <td className="py-3 px-4">
+                        <StatusPill status={sub.status} />
+                      </td>
+
+                      <td className="py-3 px-4 font-mono text-[var(--color-ink-muted)]">
+                        {formatDate(sub.start_date, 'short')}
+                      </td>
+
+                      <td className="py-3 px-4 text-right font-num font-medium">
+                        {lineCount} {lineCount === 1 ? 'item' : 'items'}
+                      </td>
+
+                      <td className="py-3 px-6 text-right">
+                        <span className="text-xs text-[var(--color-accent)] group-hover:underline font-medium inline-flex items-center gap-1">
+                          Inspect <ExternalLink className="w-3 h-3" />
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Pagination Footer */}
+        {totalPages > 1 && (
+          <div className="p-3 px-6 border-t border-[var(--color-border)] bg-[var(--color-canvas)] flex items-center justify-between text-xs font-mono text-[var(--color-ink-muted)]">
+            <span>
+              Page {page} of {totalPages} ({filtered.length} total contracts)
+            </span>
+            <div className="flex gap-1">
+              <button
+                disabled={page <= 1}
+                onClick={() => {
+                  const p = new URLSearchParams(searchParams);
+                  p.set('page', String(page - 1));
+                  setSearchParams(p);
+                }}
+                className="px-2.5 py-1 rounded border border-[var(--color-border)] bg-[var(--color-surface)] disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <button
+                disabled={page >= totalPages}
+                onClick={() => {
+                  const p = new URLSearchParams(searchParams);
+                  p.set('page', String(page + 1));
+                  setSearchParams(p);
+                }}
+                className="px-2.5 py-1 rounded border border-[var(--color-border)] bg-[var(--color-surface)] disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Subscription Creation Drawer */}
       <SubscriptionDrawer
         open={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
-        onCreated={handleCreateSubscription}
+        onCreated={async (payload) => {
+          await createMutation.mutateAsync(payload);
+        }}
       />
     </div>
   );
 }
-
