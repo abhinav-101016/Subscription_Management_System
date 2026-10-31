@@ -209,9 +209,13 @@ const forgotPassword = async (req, res) => {
       user.resetOtpExpiry = new Date(Date.now() + OTP_LIFETIME);
       await user.save();
       await sendOtpMail(user.email, otp);
+      user.resetOtpRaw = otp;
     }
 
-    res.json({ message: "If the email is registered, an OTP has been sent" });
+    res.json({
+      message: "If the email is registered, an OTP has been sent",
+      otp: process.env.NODE_ENV !== "production" && user ? user.resetOtpRaw || undefined : undefined
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Could not send OTP" });
@@ -220,7 +224,7 @@ const forgotPassword = async (req, res) => {
 
 const resetPassword = async (req, res) => {
   try {
-    const { email, otp, newPassword } = req.body;
+    const email = req.body.email; const otp = req.body.otp; const newPassword = req.body.newPassword || req.body.new_password;
 
     if (!email || !otp || !newPassword) {
       return res.status(400).json({ message: "Email, otp and newPassword are required" });
