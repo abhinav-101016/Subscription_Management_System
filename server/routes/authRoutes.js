@@ -14,6 +14,7 @@ const router = express.Router();
 
 router.post("/signup", signup);
 router.post("/verify-signup", verifySignup);
+router.post("/verify-otp", verifySignup);
 router.post("/resend-signup-otp", resendSignupOtp);
 router.post("/login", login);
 router.post("/forgot-password", forgotPassword);
