@@ -12,6 +12,16 @@ const planSchema = new mongoose.Schema(
       unique: true,
       index: true,
     },
+    price: {
+      type: Number,
+      min: [0, 'Plan price cannot be negative'],
+      default: 0,
+    },
+    cost: {
+      type: Number,
+      min: [0, 'Plan cost cannot be negative'],
+      default: 0,
+    },
     billing_frequency: {
       type: String,
       required: [true, 'Billing frequency is required'],
@@ -54,6 +64,21 @@ const planSchema = new mongoose.Schema(
       },
       default: 'Renew',
     },
+    product_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Product',
+      sparse: true,
+    },
+    variant_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ProductVariant',
+      sparse: true,
+    },
+    description: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     active: {
       type: Boolean,
       default: true,
@@ -75,4 +100,3 @@ module.exports = {
   BILLING_FREQUENCIES,
   RENEWAL_BEHAVIORS,
 };
-
