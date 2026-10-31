@@ -46,3 +46,4 @@
 
 3. **Data Scoping:**
    - Customers only receive their own contract, invoice, and payment records. The backend enforces `filter.customer_id = req.user._id`.
+
