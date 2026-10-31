@@ -54,10 +54,12 @@ const invoiceSchema = new mongoose.Schema(
     billing_period_start: {
       type: Date,
       required: [true, 'billing_period_start is required'],
+      index: true,
     },
     billing_period_end: {
       type: Date,
       required: [true, 'billing_period_end is required'],
+      index: true,
     },
     lines: {
       type: [invoiceLineSchema],
@@ -175,8 +177,11 @@ invoiceSchema.index(
   { unique: true }
 );
 
-// Index to optimize query for outstanding/overdue invoices
-invoiceSchema.index({ status: 1, amount_due: 1 });
+// High-performance compound indexes on status and dates for dashboard & overdue queries
+invoiceSchema.index({ status: 1, billing_period_end: 1, amount_due: 1 });
+invoiceSchema.index({ status: 1, billing_period_start: 1, amount_due: 1 });
+invoiceSchema.index({ status: 1, createdAt: -1 });
+invoiceSchema.index({ customer_id: 1, status: 1 });
 
 const Invoice = mongoose.model('Invoice', invoiceSchema);
 

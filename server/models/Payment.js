@@ -21,6 +21,7 @@ const paymentSchema = new mongoose.Schema(
     payment_date: {
       type: Date,
       default: Date.now,
+      index: true,
     },
     notes: {
       type: String,
@@ -33,7 +34,11 @@ const paymentSchema = new mongoose.Schema(
   }
 );
 
+// High-performance compound indexes for date-range revenue aggregation and invoice lookups
+paymentSchema.index({ payment_date: -1, amount: 1 });
+paymentSchema.index({ invoice_id: 1, payment_date: -1 });
+paymentSchema.index({ createdAt: -1, amount: 1 });
+
 const Payment = mongoose.model('Payment', paymentSchema);
 
 module.exports = Payment;
-
