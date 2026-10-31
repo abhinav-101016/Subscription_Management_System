@@ -45,3 +45,4 @@ export function useCountUp(targetValue, duration = 800) {
 
   return currentValue;
 }
+

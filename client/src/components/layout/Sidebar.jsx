@@ -189,3 +189,4 @@ export function Sidebar({ collapsed, onToggle }) {
     </aside>
   );
 }
+

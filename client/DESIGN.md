@@ -108,3 +108,4 @@ The frontend catches this and displays an inline actionable alert banner detaili
 7. **`ResourcePicker`**: Searchable customer and product variant picker with clean mock fallbacks and documented backend integration points.
 8. **`CommandPalette` (`⌘K`)**: Instant modal search across all navigation routes and quick operational actions.
 9. **`Sidebar` (`⌘B`)**: Collapsible 60-px to 240-px navigation drawer with live persona switcher (Admin, Staff, Customer).
+

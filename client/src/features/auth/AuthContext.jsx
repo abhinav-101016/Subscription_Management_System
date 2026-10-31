@@ -81,10 +81,18 @@ export function AuthProvider({ children }) {
   const verifyOtp = async (email, otp) => {
     setLoading(true);
     try {
-      const data = await apiRequest('/api/auth/verify-otp', {
-        method: 'POST',
-        body: JSON.stringify({ email, otp }),
-      });
+      let data;
+      try {
+        data = await apiRequest('/api/auth/verify-signup', {
+          method: 'POST',
+          body: JSON.stringify({ email, otp }),
+        });
+      } catch {
+        data = await apiRequest('/api/auth/verify-otp', {
+          method: 'POST',
+          body: JSON.stringify({ email, otp }),
+        });
+      }
       if (data.token) {
         setToken(data.token);
         setUser(data.user);
@@ -153,3 +161,4 @@ export function useAuth() {
   }
   return context;
 }
+

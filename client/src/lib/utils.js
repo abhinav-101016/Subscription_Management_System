@@ -57,3 +57,4 @@ export function truncateId(id, prefixLen = 6, suffixLen = 4) {
   if (str.length <= prefixLen + suffixLen) return str;
   return `${str.slice(0, prefixLen)}…${str.slice(-suffixLen)}`;
 }
+

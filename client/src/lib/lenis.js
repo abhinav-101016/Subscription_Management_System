@@ -46,3 +46,4 @@ export function pauseScroll() {
 export function resumeScroll() {
   if (lenisInstance) lenisInstance.start();
 }
+

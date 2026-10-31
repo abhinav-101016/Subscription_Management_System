@@ -58,3 +58,4 @@ export function StatusPill({ status, className }) {
 }
 
 export const Badge = StatusPill;
+

@@ -372,3 +372,4 @@ export const MOCK_DASHBOARD_SUMMARY = {
     { date: '10/31', revenue: 7420 },
   ],
 };
+

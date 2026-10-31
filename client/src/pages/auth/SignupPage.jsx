@@ -72,7 +72,8 @@ export default function SignupPage() {
               value={formData.password}
               onChange={(e) => setFormData({ ...formData, password: e.target.value })}
               required
-              placeholder="At least 8 characters"
+              placeholder="e.g. Password@123"
+              helperText="Min 9 chars, uppercase, lowercase & symbol"
             />
 
             <Input
@@ -99,3 +100,4 @@ export default function SignupPage() {
     </div>
   );
 }
+

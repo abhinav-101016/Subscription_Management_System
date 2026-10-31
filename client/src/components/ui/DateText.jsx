@@ -8,3 +8,4 @@ export function DateText({ date, format = 'medium', className }) {
     </span>
   );
 }
+
