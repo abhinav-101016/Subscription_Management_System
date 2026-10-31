@@ -135,6 +135,8 @@ const processBillingCycle = async ({ referenceDate, session = null }) => {
       subtotal,
       tax_total: taxTotal,
       grand_total: grandTotal,
+      amount_paid: 0,
+      amount_due: grandTotal,
       status: 'Draft',
       tax_rule_applied: activeTaxRule
         ? {
@@ -229,4 +231,3 @@ module.exports = {
   processBillingCycle,
   generateInvoiceNumber,
 };
-

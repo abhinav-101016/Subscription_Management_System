@@ -92,6 +92,17 @@ const invoiceSchema = new mongoose.Schema(
       min: [0, 'grand_total cannot be negative'],
       default: 0,
     },
+    amount_paid: {
+      type: Number,
+      default: 0,
+      min: [0, 'amount_paid cannot be negative'],
+    },
+    amount_due: {
+      type: Number,
+      default: 0,
+      min: [0, 'amount_due cannot be negative'],
+      index: true,
+    },
     status: {
       type: String,
       required: [true, 'status is required'],
@@ -134,14 +145,38 @@ const invoiceSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
   }
 );
+
+// Virtual field that calculates grand_total minus associated payments
+invoiceSchema.virtual('calculated_amount_due').get(function () {
+  const paid = Number(this.amount_paid) || 0;
+  const total = Number(this.grand_total) || 0;
+  return Math.max(0, Number((total - paid).toFixed(2)));
+});
+
+// Pre-save hook to initialize amount_due on creation if not explicitly set
+invoiceSchema.pre('save', function () {
+  if (
+    this.isNew &&
+    (this.amount_due === 0 || this.amount_due === undefined) &&
+    this.grand_total > 0 &&
+    (!this.amount_paid || this.amount_paid === 0)
+  ) {
+    this.amount_due = this.grand_total;
+  }
+});
 
 // Compound unique index for strict database-level idempotency
 invoiceSchema.index(
   { subscription_id: 1, billing_period_start: 1, billing_period_end: 1 },
   { unique: true }
 );
+
+// Index to optimize query for outstanding/overdue invoices
+invoiceSchema.index({ status: 1, amount_due: 1 });
 
 const Invoice = mongoose.model('Invoice', invoiceSchema);
 
