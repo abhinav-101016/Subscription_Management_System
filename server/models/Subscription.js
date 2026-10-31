@@ -61,6 +61,19 @@ const subscriptionSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    next_billing_date: {
+      type: Date,
+      default: Date.now,
+      index: true,
+    },
+    last_billed_date: {
+      type: Date,
+    },
+    billing_interval_days: {
+      type: Number,
+      default: 30,
+      min: 1,
+    },
     expiry_date: {
       type: Date,
     },
@@ -95,4 +108,3 @@ module.exports = {
   Subscription,
   SUBSCRIPTION_STATUSES,
 };
-
