@@ -8,7 +8,10 @@ const QuotationTemplate = require('../models/QuotationTemplate');
  */
 const createTemplate = async (req, res) => {
   try {
-    const { name, default_plan_id, validity_days, template_lines } = req.body;
+    const name = req.body.name;
+    const default_plan_id = req.body.default_plan_id || req.body.plan_id;
+    const validity_days = req.body.validity_days || 30;
+    const rawLines = req.body.template_lines || req.body.lines || [];
 
     // Validate required fields
     if (!name || typeof name !== 'string' || !name.trim()) {
@@ -26,37 +29,44 @@ const createTemplate = async (req, res) => {
     }
 
     const validity = Number(validity_days);
-    if (!validity_days || isNaN(validity) || validity < 1) {
+    if (isNaN(validity) || validity < 1) {
       return res.status(400).json({
         success: false,
         message: 'validity_days must be a positive number greater than or equal to 1',
       });
     }
 
-    if (!Array.isArray(template_lines) || template_lines.length === 0) {
+    if (!Array.isArray(rawLines) || rawLines.length === 0) {
       return res.status(400).json({
         success: false,
         message: 'template_lines must be a non-empty array of items',
       });
     }
 
+    const template_lines = [];
     // Validate each template line
-    for (let i = 0; i < template_lines.length; i++) {
-      const line = template_lines[i];
-      if (!line.product_variant_id || !mongoose.Types.ObjectId.isValid(line.product_variant_id)) {
+    for (let i = 0; i < rawLines.length; i++) {
+      const line = rawLines[i];
+      const variantId = line.product_variant_id || line.variant_id;
+      if (!variantId || !mongoose.Types.ObjectId.isValid(variantId)) {
         return res.status(400).json({
           success: false,
           message: `Invalid or missing product_variant_id at line index ${i}`,
         });
       }
 
-      const qty = Number(line.default_quantity);
+      const qty = Number(line.default_quantity !== undefined ? line.default_quantity : line.quantity);
       if (isNaN(qty) || qty < 1) {
         return res.status(400).json({
           success: false,
           message: `default_quantity at line index ${i} must be a number greater than or equal to 1`,
         });
       }
+
+      template_lines.push({
+        product_variant_id: variantId,
+        default_quantity: qty,
+      });
     }
 
     const newTemplate = new QuotationTemplate({
@@ -151,4 +161,3 @@ module.exports = {
   getAllTemplates,
   getTemplateById,
 };
-

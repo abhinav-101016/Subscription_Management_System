@@ -1,11 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const {
+  createSubscription,
   createSubscriptionFromTemplate,
   updateSubscriptionStatus,
   getAllSubscriptions,
   getSubscriptionById,
 } = require('../controllers/subscriptionController');
+
+// POST /api/subscriptions - Create a new Draft subscription
+router.post('/', createSubscription);
 
 // POST /api/subscriptions/from-template - Create a new Draft subscription by copying data from a specific template ID
 router.post('/from-template', createSubscriptionFromTemplate);
@@ -20,4 +24,3 @@ router.get('/', getAllSubscriptions);
 router.get('/:id', getSubscriptionById);
 
 module.exports = router;
-
