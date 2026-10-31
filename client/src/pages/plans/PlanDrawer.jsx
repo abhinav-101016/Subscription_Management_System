@@ -4,6 +4,7 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
 import { useToast } from '../../hooks/useToast';
+import { AlertCircle } from 'lucide-react';
 
 export function PlanDrawer({ open, onClose, onSave, initialData }) {
   const [formData, setFormData] = useState({
@@ -13,8 +14,10 @@ export function PlanDrawer({ open, onClose, onSave, initialData }) {
     available_from: new Date().toISOString().slice(0, 10),
     available_to: '',
     renewal_behavior: 'Renew',
+    active: true,
   });
   const [loading, setLoading] = useState(false);
+  const [dateError, setDateError] = useState('');
   const toast = useToast();
 
   useEffect(() => {
@@ -23,9 +26,10 @@ export function PlanDrawer({ open, onClose, onSave, initialData }) {
         name: initialData.name || '',
         billing_frequency: initialData.billing_frequency || 'Monthly',
         minimum_quantity: initialData.minimum_quantity || 1,
-        available_from: initialData.available_from ? initialData.available_from.slice(0, 10) : '',
+        available_from: initialData.available_from ? initialData.available_from.slice(0, 10) : new Date().toISOString().slice(0, 10),
         available_to: initialData.available_to ? initialData.available_to.slice(0, 10) : '',
         renewal_behavior: initialData.renewal_behavior || 'Renew',
+        active: initialData.active !== undefined ? initialData.active : true,
       });
     } else {
       setFormData({
@@ -35,25 +39,37 @@ export function PlanDrawer({ open, onClose, onSave, initialData }) {
         available_from: new Date().toISOString().slice(0, 10),
         available_to: '',
         renewal_behavior: 'Renew',
+        active: true,
       });
     }
+    setDateError('');
   }, [initialData, open]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setDateError('');
+
+    // Strict validation: available_to >= available_from
+    if (formData.available_to && formData.available_from) {
+      if (new Date(formData.available_to) < new Date(formData.available_from)) {
+        setDateError('Available To date must be on or after Available From date.');
+        return;
+      }
+    }
+
     setLoading(true);
     try {
       const payload = {
         ...formData,
-        minimum_quantity: Number(formData.minimum_quantity),
+        minimum_quantity: Number(formData.minimum_quantity) || 1,
         available_to: formData.available_to ? formData.available_to : null,
       };
 
       await onSave(payload, initialData?._id);
-      toast.success(initialData ? 'Plan configuration updated' : 'New plan created');
+      toast.success(initialData ? 'Plan updated' : 'Plan created');
       onClose();
     } catch (err) {
-      toast.error(err.message || 'Failed to save plan', 'Error');
+      toast.error(err.message || 'Failed to save plan');
     } finally {
       setLoading(false);
     }
@@ -63,18 +79,24 @@ export function PlanDrawer({ open, onClose, onSave, initialData }) {
     <Drawer
       open={open}
       onClose={onClose}
-      title={initialData ? 'Edit Plan Configuration' : 'Create Billing Plan'}
-      description="Define contract cycles, quantity minimums, and terminal renewal behaviors."
+      title={initialData ? 'Edit Billing Plan' : 'New Billing Plan'}
+      description="Configure plan recurrence frequency, minimum quantities, and renewal end behaviors."
       width="max-w-md"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
+        {dateError && (
+          <div className="p-3 rounded-lg border border-[var(--color-accent-border)] bg-[var(--color-accent-tint)] flex items-center gap-2 text-xs text-[var(--color-accent)] font-medium">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{dateError}</span>
+          </div>
+        )}
+
         <Input
-          label="Plan Display Name"
-          type="text"
+          label="Plan Name"
           value={formData.name}
           onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+          placeholder="e.g. Enterprise Tier"
           required
-          placeholder="e.g. Enterprise Infrastructure (Annual)"
         />
 
         <div className="grid grid-cols-2 gap-4">
@@ -100,18 +122,17 @@ export function PlanDrawer({ open, onClose, onSave, initialData }) {
         </div>
 
         <Select
-          label="End of Period Renewal Behavior"
+          label="Renewal Behavior"
           value={formData.renewal_behavior}
           onChange={(e) => setFormData({ ...formData, renewal_behavior: e.target.value })}
-          helperText="Determines how the automated billing engine processes expired terms."
         >
-          <option value="Renew">Renew (Roll into new recurring cycle)</option>
-          <option value="Pause">Pause (Halt generation until manual approval)</option>
-          <option value="Auto-Close">Auto-Close (Transition subscription to Closed)</option>
-          <option value="Early-Close">Early-Close (Grace window termination)</option>
+          <option value="Renew">Renew (Auto-renew ongoing cycle)</option>
+          <option value="Auto-Close">Auto-Close (Terminates when cycle ends)</option>
+          <option value="Early-Close">Early-Close (Allows early customer cancellation)</option>
+          <option value="Pause">Pause (Suspends billing cycle)</option>
         </Select>
 
-        <div className="grid grid-cols-2 gap-4 pt-2">
+        <div className="grid grid-cols-2 gap-4">
           <Input
             label="Available From"
             type="date"
@@ -125,20 +146,31 @@ export function PlanDrawer({ open, onClose, onSave, initialData }) {
             type="date"
             value={formData.available_to}
             onChange={(e) => setFormData({ ...formData, available_to: e.target.value })}
-            helperText="Leave empty for indefinite duration"
           />
         </div>
 
-        <div className="flex items-center justify-end gap-2 pt-6 border-t border-[var(--color-border)]">
-          <Button type="button" variant="ghost" onClick={onClose}>
+        <div className="flex items-center gap-2 pt-2">
+          <input
+            type="checkbox"
+            id="plan-active-checkbox"
+            checked={formData.active}
+            onChange={(e) => setFormData({ ...formData, active: e.target.checked })}
+            className="rounded border-[var(--color-border)] text-[var(--color-accent)] focus:ring-[var(--color-accent)]"
+          />
+          <label htmlFor="plan-active-checkbox" className="text-xs text-[var(--color-ink)] font-medium">
+            Plan is active and available for subscriptions
+          </label>
+        </div>
+
+        <div className="flex justify-end gap-3 pt-4 border-t border-[var(--color-border)]">
+          <Button variant="ghost" onClick={onClose} type="button">
             Cancel
           </Button>
-          <Button type="submit" loading={loading}>
-            {initialData ? 'Save Changes' : 'Create Plan'}
+          <Button variant="primary" type="submit" loading={loading}>
+            Save Plan
           </Button>
         </div>
       </form>
     </Drawer>
   );
 }
-

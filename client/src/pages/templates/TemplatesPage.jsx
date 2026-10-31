@@ -1,164 +1,104 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Edit2, Play, FileSpreadsheet, ArrowRight } from 'lucide-react';
-import { apiRequest } from '../../lib/apiClient';
-import { DataTable } from '../../components/ui/DataTable';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Plus, Edit2, Play, Copy, ArrowRight } from 'lucide-react';
+import { api } from '../../lib/apiClient';
 import { Button } from '../../components/ui/Button';
-import { MoneyText } from '../../components/ui/MoneyText';
+import { Dialog } from '../../components/ui/Dialog';
+import { ResourcePicker } from '../../components/ui/ResourcePicker';
 import { TemplateBuilderDrawer } from './TemplateBuilderDrawer';
 import { useToast } from '../../hooks/useToast';
+import { cn } from '../../lib/utils';
 
 export default function TemplatesPage() {
-  const [templates, setTemplates] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState(null);
+  const [selectedTemplateForSub, setSelectedTemplateForSub] = useState(null);
+  const [customerIdForSub, setCustomerIdForSub] = useState('');
+  const [isInstantiateDialogOpen, setIsInstantiateDialogOpen] = useState(false);
+
   const navigate = useNavigate();
   const toast = useToast();
+  const queryClient = useQueryClient();
 
-  const fetchTemplates = async () => {
-    setLoading(true);
-    try {
-      const data = await apiRequest('/api/templates');
-      setTemplates(data || []);
-    } catch (err) {
-      toast.error('Unable to retrieve quotation templates', 'Error');
-    } finally {
-      setLoading(false);
-    }
+  // 1. Fetch Templates
+  const { data: templates = [], isLoading } = useQuery({
+    queryKey: ['templates-list'],
+    queryFn: async () => {
+      const res = await api.get('/api/templates');
+      return Array.isArray(res) ? res : res?.data || [];
+    },
+  });
+
+  // Save template mutation
+  const saveMutation = useMutation({
+    mutationFn: async (payload) => {
+      return await api.post('/api/templates', payload);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['templates-list'] });
+      toast.success('Quotation template saved');
+    },
+    onError: (err) => {
+      toast.error(err.message || 'Failed to save template');
+    },
+  });
+
+  // Instantiate subscription from template mutation
+  const instantiateMutation = useMutation({
+    mutationFn: async ({ template_id, customer_id }) => {
+      return await api.post('/api/subscriptions/from-template', {
+        template_id,
+        customer_id,
+      });
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['subscriptions-list'] });
+      toast.success('Draft contract initialized from quotation template');
+      setIsInstantiateDialogOpen(false);
+      const subId = data?._id || data?.data?._id || data?.id;
+      if (subId) {
+        navigate(`/app/subscriptions/${subId}`);
+      }
+    },
+    onError: (err) => {
+      toast.error(err.message || 'Failed to instantiate subscription');
+    },
+  });
+
+  const handleOpenInstantiate = (template, e) => {
+    e.stopPropagation();
+    setSelectedTemplateForSub(template);
+    setCustomerIdForSub('');
+    setIsInstantiateDialogOpen(true);
   };
 
-  useEffect(() => {
-    fetchTemplates();
-  }, []);
-
-  const handleSaveTemplate = async (payload, id) => {
-    if (id) {
-      const updated = await apiRequest(`/api/templates/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify(payload),
-      });
-      setTemplates(templates.map((t) => (t._id === id ? updated : t)));
-    } else {
-      const created = await apiRequest('/api/templates', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
-      setTemplates([created, ...templates]);
+  const handleConfirmInstantiate = () => {
+    if (!customerIdForSub) {
+      toast.warning('Please select a customer account');
+      return;
     }
+    instantiateMutation.mutate({
+      template_id: selectedTemplateForSub._id,
+      customer_id: customerIdForSub,
+    });
   };
-
-  // Convert template into an active subscription draft
-  const handleInstantiateSubscription = async (template, e) => {
-    e?.stopPropagation();
-    try {
-      const created = await apiRequest('/api/subscriptions', {
-        method: 'POST',
-        body: JSON.stringify({
-          customer_id: '672458a4e8d3560000000001', // Default Acme customer
-          plan_id: template.plan_id?._id || template.plan_id,
-          start_date: new Date().toISOString(),
-          lines: template.lines.map((l) => ({
-            product_variant_id: l.product_variant_id?._id || l.product_variant_id,
-            quantity: l.quantity,
-            unit_price: l.unit_price,
-          })),
-        }),
-      });
-
-      toast.success(
-        `Draft created from template "${template.name}"`,
-        'Subscription Initialized'
-      );
-      navigate(`/subscriptions/${created._id}`);
-    } catch (err) {
-      toast.error(err.message || 'Failed to instantiate subscription', 'Error');
-    }
-  };
-
-  const columns = [
-    {
-      header: 'Template Name',
-      key: 'name',
-      sortable: true,
-      render: (row) => (
-        <div>
-          <span className="font-semibold text-xs text-[var(--color-ink)]">
-            {row.name}
-          </span>
-          <div className="text-[11px] text-[var(--color-ink-faint)]">
-            {row.lines?.length || 1} preconfigured line items
-          </div>
-        </div>
-      ),
-    },
-    {
-      header: 'Linked Plan',
-      key: 'plan',
-      render: (row) => (
-        <span className="text-xs font-medium text-[var(--color-ink)]">
-          {row.plan_id?.name || 'Default Plan'}
-        </span>
-      ),
-    },
-    {
-      header: 'Estimated Value',
-      key: 'value',
-      render: (row) => {
-        const total = (row.lines || []).reduce(
-          (acc, l) => acc + (l.quantity || 1) * (l.unit_price || 0),
-          0
-        );
-        return (
-          <span className="font-semibold text-xs">
-            <MoneyText amount={total} />
-          </span>
-        );
-      },
-    },
-    {
-      header: 'Actions',
-      key: 'actions',
-      render: (row) => (
-        <div className="flex items-center gap-2">
-          <Button
-            size="xs"
-            variant="accentSubtle"
-            onClick={(e) => handleInstantiateSubscription(row, e)}
-            icon={Play}
-          >
-            Create Subscription
-          </Button>
-          <Button
-            size="xs"
-            variant="ghost"
-            onClick={(e) => {
-              e.stopPropagation();
-              setEditingTemplate(row);
-              setIsDrawerOpen(true);
-            }}
-            icon={Edit2}
-          >
-            Edit
-          </Button>
-        </div>
-      ),
-    },
-  ];
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-200">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-6 text-[var(--color-ink)]">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[var(--color-border)]">
         <div>
-          <h1 className="font-serif-display text-2xl md:text-3xl font-medium tracking-tight text-[var(--color-ink)]">
+          <h1 className="font-serif-display text-3xl font-normal tracking-tight">
             Quotation Templates
           </h1>
-          <p className="text-xs text-[var(--color-ink-muted)] mt-1">
-            Standard sales packages with predefined pricing schedules and product lines.
+          <p className="text-xs text-[var(--color-ink-muted)] font-mono mt-0.5">
+            Standardized multi-line packages for instant 1-click subscription generation.
           </p>
         </div>
 
         <Button
+          variant="primary"
           onClick={() => {
             setEditingTemplate(null);
             setIsDrawerOpen(true);
@@ -169,25 +109,131 @@ export default function TemplatesPage() {
         </Button>
       </div>
 
-      <DataTable
-        columns={columns}
-        data={templates}
-        loading={loading}
-        onRowClick={(row) => {
-          setEditingTemplate(row);
-          setIsDrawerOpen(true);
-        }}
-        emptyTitle="No quotation templates"
-        emptyDescription="Create reusable bundle presets to accelerate enterprise contract sales."
-      />
+      {/* Table */}
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl overflow-hidden shadow-2xs">
+        {isLoading ? (
+          <div className="p-8 text-center text-xs text-[var(--color-ink-muted)] font-mono">
+            Loading quotation templates...
+          </div>
+        ) : templates.length === 0 ? (
+          <div className="p-12 text-center text-xs text-[var(--color-ink-muted)] space-y-3">
+            <p>No quotation templates defined yet.</p>
+            <Button
+              variant="secondary"
+              size="xs"
+              onClick={() => {
+                setEditingTemplate(null);
+                setIsDrawerOpen(true);
+              }}
+            >
+              Build First Template
+            </Button>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-[var(--color-canvas)] border-b border-[var(--color-border)] font-mono uppercase text-[10px] text-[var(--color-ink-muted)]">
+                <tr>
+                  <th className="py-2.5 px-6">Template Name</th>
+                  <th className="py-2.5 px-4">Default Plan</th>
+                  <th className="py-2.5 px-4">Validity</th>
+                  <th className="py-2.5 px-4 text-right">Items Included</th>
+                  <th className="py-2.5 px-6 text-right">Instant Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--color-border)]">
+                {templates.map((tmpl) => {
+                  const lineCount = (tmpl.template_lines || tmpl.lines || []).length;
+                  return (
+                    <tr key={tmpl._id} className="hover:bg-[var(--color-surface-hover)] transition-colors">
+                      <td className="py-3 px-6 font-medium text-[var(--color-ink)]">
+                        {tmpl.name}
+                      </td>
 
+                      <td className="py-3 px-4 font-mono text-[var(--color-ink-muted)]">
+                        {tmpl.default_plan_id?.name || tmpl.plan_id?.name || 'Standard Tier'}
+                      </td>
+
+                      <td className="py-3 px-4 font-mono">
+                        {tmpl.validity_days || 30} days
+                      </td>
+
+                      <td className="py-3 px-4 text-right font-num font-medium">
+                        {lineCount} {lineCount === 1 ? 'line' : 'lines'}
+                      </td>
+
+                      <td className="py-3 px-6 text-right">
+                        <Button
+                          variant="secondary"
+                          size="xs"
+                          onClick={(e) => handleOpenInstantiate(tmpl, e)}
+                          icon={Play}
+                        >
+                          Generate Contract
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Template Builder Drawer */}
       <TemplateBuilderDrawer
         open={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
-        onSave={handleSaveTemplate}
         initialData={editingTemplate}
+        onSave={async (payload) => {
+          await saveMutation.mutateAsync(payload);
+        }}
       />
+
+      {/* Instantiate Subscription Modal */}
+      <Dialog
+        open={isInstantiateDialogOpen}
+        onClose={() => setIsInstantiateDialogOpen(false)}
+        title="Create Subscription from Template"
+        description={`Initialize a new contract based on ${selectedTemplateForSub?.name || 'template'}`}
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4">
+          <ResourcePicker
+            type="customer"
+            value={customerIdForSub}
+            onChange={setCustomerIdForSub}
+            label="Assign Customer Account"
+          />
+
+          <div className="p-3 rounded-lg bg-[var(--color-canvas)] border border-[var(--color-border)] text-xs text-[var(--color-ink-muted)] space-y-1">
+            <div className="flex justify-between font-mono">
+              <span>Default Plan:</span>
+              <span className="font-semibold text-[var(--color-ink)]">
+                {selectedTemplateForSub?.default_plan_id?.name || selectedTemplateForSub?.plan_id?.name || 'Configured Plan'}
+              </span>
+            </div>
+            <div className="flex justify-between font-mono">
+              <span>Lines:</span>
+              <span>{(selectedTemplateForSub?.template_lines || selectedTemplateForSub?.lines || []).length} items bundled</span>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="ghost" onClick={() => setIsInstantiateDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              loading={instantiateMutation.isPending}
+              onClick={handleConfirmInstantiate}
+            >
+              Generate Draft Contract
+            </Button>
+          </div>
+        </div>
+      </Dialog>
     </div>
   );
 }
-

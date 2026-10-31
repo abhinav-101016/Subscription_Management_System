@@ -1,49 +1,89 @@
 import Lenis from 'lenis';
 
 let lenisInstance = null;
+let rafId = null;
 
-export function initSmoothScroll() {
-  if (typeof window === 'undefined') return null;
+/**
+ * Initializes Lenis smooth scrolling.
+ * Always returns a safe cleanup function () => void.
+ */
+export function initSmoothScroll(wrapperElement = null) {
+  if (typeof window === 'undefined') return () => {};
 
   // Respect reduced-motion preferences
   const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (prefersReducedMotion) return null;
+  if (prefersReducedMotion) return () => {};
 
-  // Don't initialize on primary touch devices
-  const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-  if (isTouch) return null;
-
-  if (lenisInstance) return lenisInstance;
+  // Don't initialize on purely primary touch devices without fine pointers
+  const isPureTouch = 'ontouchstart' in window && !window.matchMedia('(pointer: fine)').matches;
+  if (isPureTouch) return () => {};
 
   try {
-    lenisInstance = new Lenis({
+    if (lenisInstance) {
+      try {
+        lenisInstance.destroy();
+      } catch (_) {}
+      lenisInstance = null;
+    }
+
+    const options = {
       duration: 1.1,
       easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
       lerp: 0.09,
       smoothWheel: true,
       wheelMultiplier: 0.9,
-    });
+    };
+
+    if (wrapperElement) {
+      options.wrapper = wrapperElement;
+      options.content = wrapperElement.firstElementChild || wrapperElement;
+    }
+
+    lenisInstance = new Lenis(options);
 
     function raf(time) {
       if (lenisInstance) {
         lenisInstance.raf(time);
-        requestAnimationFrame(raf);
+        rafId = requestAnimationFrame(raf);
       }
     }
 
-    requestAnimationFrame(raf);
-    return lenisInstance;
+    rafId = requestAnimationFrame(raf);
+
+    return () => {
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      if (lenisInstance) {
+        try {
+          lenisInstance.destroy();
+        } catch (_) {}
+        lenisInstance = null;
+      }
+    };
   } catch (e) {
     console.warn('Lenis smooth scroll failed to initialize:', e);
-    return null;
+    return () => {};
   }
 }
 
 export function pauseScroll() {
-  if (lenisInstance) lenisInstance.stop();
+  if (lenisInstance) {
+    try {
+      lenisInstance.stop();
+    } catch (_) {}
+  }
 }
 
 export function resumeScroll() {
-  if (lenisInstance) lenisInstance.start();
+  if (lenisInstance) {
+    try {
+      lenisInstance.start();
+    } catch (_) {}
+  }
 }
 
+export function getLenis() {
+  return lenisInstance;
+}

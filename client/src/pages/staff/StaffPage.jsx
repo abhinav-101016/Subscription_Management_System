@@ -1,194 +1,220 @@
-import React, { useState, useEffect } from 'react';
-import { Users, Plus, Shield, ShieldAlert, CheckCircle2 } from 'lucide-react';
-import { apiRequest } from '../../lib/apiClient';
-import { DataTable } from '../../components/ui/DataTable';
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Users, Plus, Shield, Check, AlertCircle } from 'lucide-react';
+import { api } from '../../lib/apiClient';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
 import { Dialog } from '../../components/ui/Dialog';
-import { DateText } from '../../components/ui/DateText';
 import { useAuth } from '../../features/auth/AuthContext';
 import { useToast } from '../../hooks/useToast';
+import { formatDate } from '../../lib/utils';
 
 export default function StaffPage() {
-  const { isAdmin } = useAuth();
-  const [staffList, setStaffList] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { role } = useAuth();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [formData, setFormData] = useState({
+  const [form, setForm] = useState({
     name: '',
     email: '',
     password: '',
     role: 'staff',
+    department: 'Billing & Operations',
   });
-  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const queryClient = useQueryClient();
   const toast = useToast();
 
-  const fetchStaff = async () => {
-    setLoading(true);
-    try {
-      const response = await apiRequest('/api/admin/staff');
-      // Some endpoints return { staff: [...] } or direct array
-      const list = response?.staff || response || [];
-      setStaffList(list);
-    } catch (err) {
-      toast.error('Failed to load internal staff directory', 'Error');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { data: staffList = [], isLoading } = useQuery({
+    queryKey: ['admin-staff-list'],
+    queryFn: async () => {
+      const res = await api.get('/api/admin/staff');
+      const list = res?.staff || (Array.isArray(res) ? res : res?.data || []);
+      return list;
+    },
+    enabled: role === 'admin',
+  });
 
-  useEffect(() => {
-    if (isAdmin) {
-      fetchStaff();
-    }
-  }, [isAdmin]);
-
-  const handleCreateStaff = async (e) => {
-    e.preventDefault();
-    setSubmitting(true);
-    try {
-      const created = await apiRequest('/api/admin/staff', {
-        method: 'POST',
-        body: JSON.stringify(formData),
-      });
-
-      setStaffList([created, ...staffList]);
-      toast.success(`Staff member "${formData.name}" invited successfully`);
+  const createMutation = useMutation({
+    mutationFn: async (payload) => {
+      return await api.post('/api/admin/staff', payload);
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['admin-staff-list'] });
+      toast.success('Staff account provisioned');
       setIsDialogOpen(false);
-      setFormData({ name: '', email: '', password: '', role: 'staff' });
-    } catch (err) {
-      toast.error(err.message || 'Failed to create staff member', 'Error');
-    } finally {
-      setSubmitting(false);
+      setForm({ name: '', email: '', password: '', role: 'staff', department: 'Billing & Operations' });
+    },
+    onError: (err) => {
+      setError(err.message || 'Failed to create staff member');
+    },
+  });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    setError('');
+
+    if (form.password.length < 8) {
+      setError('Password must be at least 8 characters long');
+      return;
     }
+
+    createMutation.mutate({
+      name: form.name.trim(),
+      email: form.email.trim(),
+      password: form.password,
+      role: form.role,
+      department: form.department,
+    });
   };
-
-  if (!isAdmin) {
-    return (
-      <div className="py-16 text-center space-y-3">
-        <ShieldAlert className="w-10 h-10 text-amber-600 mx-auto" />
-        <h2 className="text-base font-semibold text-[var(--color-ink)]">
-          Admin Privilege Required
-        </h2>
-        <p className="text-xs text-[var(--color-ink-muted)] max-w-sm mx-auto">
-          Staff governance and role assignment is restricted strictly to users with the Administrator role.
-        </p>
-      </div>
-    );
-  }
-
-  const columns = [
-    {
-      header: 'Team Member',
-      key: 'name',
-      sortable: true,
-      render: (row) => (
-        <div>
-          <div className="font-semibold text-xs text-[var(--color-ink)]">{row.name}</div>
-          <div className="text-[11px] text-[var(--color-ink-muted)]">{row.email}</div>
-        </div>
-      ),
-    },
-    {
-      header: 'Assigned Role',
-      key: 'role',
-      sortable: true,
-      render: (row) => (
-        <span
-          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border capitalize ${
-            row.role === 'admin'
-              ? 'bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/20'
-              : 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20'
-          }`}
-        >
-          <Shield className="w-3 h-3" />
-          {row.role}
-        </span>
-      ),
-    },
-    {
-      header: 'Joined Date',
-      key: 'createdAt',
-      sortable: true,
-      render: (row) => <DateText date={row.createdAt || new Date()} format="medium" />,
-    },
-  ];
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-200">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-6 text-[var(--color-ink)]">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[var(--color-border)]">
         <div>
-          <h1 className="font-serif-display text-2xl md:text-3xl font-medium tracking-tight text-[var(--color-ink)]">
-            Staff & Internal Governance
+          <h1 className="font-serif-display text-3xl font-normal tracking-tight">
+            Staff Directory & Governance
           </h1>
-          <p className="text-xs text-[var(--color-ink-muted)] mt-1">
-            Manage administrative personnel, role authorizations, and audit scopes.
+          <p className="text-xs text-[var(--color-ink-muted)] font-mono mt-0.5">
+            Internal operators with access to contracts, invoices, and billing actions.
           </p>
         </div>
 
-        <Button onClick={() => setIsDialogOpen(true)} icon={Plus}>
-          Add Team Member
+        <Button variant="primary" onClick={() => setIsDialogOpen(true)} icon={Plus}>
+          Add Staff Member
         </Button>
       </div>
 
-      <DataTable
-        columns={columns}
-        data={staffList}
-        loading={loading}
-        emptyTitle="No staff registered"
-        emptyDescription="Add internal operators to collaborate on billing cycles and subscriptions."
-      />
+      {/* Table */}
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl overflow-hidden shadow-2xs">
+        {isLoading ? (
+          <div className="p-8 text-center text-xs text-[var(--color-ink-muted)] font-mono">
+            Loading staff directory...
+          </div>
+        ) : staffList.length === 0 ? (
+          <div className="p-12 text-center text-xs text-[var(--color-ink-muted)] space-y-3">
+            <p>No internal staff accounts registered.</p>
+            <Button variant="secondary" size="xs" onClick={() => setIsDialogOpen(true)}>
+              Provision First Account
+            </Button>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-[var(--color-canvas)] border-b border-[var(--color-border)] font-mono uppercase text-[10px] text-[var(--color-ink-muted)]">
+                <tr>
+                  <th className="py-2.5 px-6">Staff Member</th>
+                  <th className="py-2.5 px-4">Identifier / Login</th>
+                  <th className="py-2.5 px-4">Department</th>
+                  <th className="py-2.5 px-4">Access Role</th>
+                  <th className="py-2.5 px-6 text-right">Joined</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--color-border)]">
+                {staffList.map((member) => (
+                  <tr key={member._id} className="hover:bg-[var(--color-surface-hover)] transition-colors">
+                    <td className="py-3 px-6">
+                      <span className="font-medium text-[var(--color-ink)] block">
+                        {member.name}
+                      </span>
+                      <span className="text-[10px] font-mono text-[var(--color-ink-faint)]">
+                        {member.email}
+                      </span>
+                    </td>
 
+                    <td className="py-3 px-4 font-mono text-xs text-[var(--color-ink-muted)]">
+                      {member.staffId || member.loginId || member._id.slice(-8)}
+                    </td>
+
+                    <td className="py-3 px-4 font-ui text-[var(--color-ink)]">
+                      {member.department || 'Operations'}
+                    </td>
+
+                    <td className="py-3 px-4">
+                      <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-[var(--color-canvas)] border border-[var(--color-border)] font-semibold">
+                        {member.role || 'staff'}
+                      </span>
+                    </td>
+
+                    <td className="py-3 px-6 text-right font-mono text-[var(--color-ink-muted)]">
+                      {formatDate(member.createdAt, 'short')}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Provision Account Modal */}
       <Dialog
         open={isDialogOpen}
         onClose={() => setIsDialogOpen(false)}
-        title="Invite Internal Staff Member"
-        description="Creates an authorized account with scoped operational permissions."
+        title="Provision Internal Operator"
+        description="Create internal credential for administrative and operations personnel."
+        maxWidth="max-w-md"
       >
-        <form onSubmit={handleCreateStaff} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {error && (
+            <div className="p-3 rounded border border-[var(--color-accent-border)] bg-[var(--color-accent-tint)] text-xs text-[var(--color-accent)] flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
           <Input
             label="Full Name"
-            type="text"
-            value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            placeholder="e.g. Robert Taylor"
             required
-            placeholder="Julian Hayes"
+            autoFocus
           />
 
           <Input
-            label="Internal Work Email"
+            label="Company Email"
             type="email"
-            value={formData.email}
-            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+            placeholder="robert@cadence.io"
             required
-            placeholder="julian@cadence.io"
           />
+
+          <div className="grid grid-cols-2 gap-4">
+            <Select
+              label="Role"
+              value={form.role}
+              onChange={(e) => setForm({ ...form, role: e.target.value })}
+            >
+              <option value="staff">Staff Operator</option>
+              <option value="admin">Super Admin</option>
+            </Select>
+
+            <Input
+              label="Department"
+              value={form.department}
+              onChange={(e) => setForm({ ...form, department: e.target.value })}
+              placeholder="e.g. Finance"
+              required
+            />
+          </div>
 
           <Input
-            label="Temporary Password"
+            label="Initial Temporary Password"
             type="password"
-            value={formData.password}
-            onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+            value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
+            placeholder="Min. 8 characters"
             required
-            placeholder="••••••••"
           />
 
-          <Select
-            label="Role Authorization"
-            value={formData.role}
-            onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-          >
-            <option value="staff">Staff Operator (Subscriptions, Invoices, Billing)</option>
-            <option value="admin">Administrator (Full System & Tax Authority)</option>
-          </Select>
-
-          <div className="flex items-center justify-end gap-2 pt-4 border-t border-[var(--color-border)]">
-            <Button type="button" variant="ghost" onClick={() => setIsDialogOpen(false)}>
+          <div className="flex justify-end gap-3 pt-3 border-t border-[var(--color-border)]">
+            <Button variant="ghost" onClick={() => setIsDialogOpen(false)} type="button">
               Cancel
             </Button>
-            <Button type="submit" loading={submitting}>
-              Issue Invitation
+            <Button variant="primary" type="submit" loading={createMutation.isPending}>
+              Create Operator Account
             </Button>
           </div>
         </form>
@@ -196,4 +222,3 @@ export default function StaffPage() {
     </div>
   );
 }
-

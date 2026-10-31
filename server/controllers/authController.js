@@ -55,7 +55,10 @@ const signup = async (req, res) => {
 
     await sendOtpMail(user.email, otp, "Verify your email");
 
-    res.status(201).json({ message: "Signup successful. An OTP has been sent to your email" });
+    res.status(201).json({
+      message: "Signup successful. An OTP has been sent to your email",
+      otp: process.env.NODE_ENV !== "production" ? otp : undefined
+    });
   } catch (error) {
     if (error.code === 11000) {
       return res.status(409).json({ message: "Email already registered" });
@@ -117,15 +120,20 @@ const resendSignupOtp = async (req, res) => {
 
     const user = await User.findOne({ email: email.toLowerCase() });
 
+    let devOtp;
     if (user && user.isVerified === false) {
       const { otp, hash } = await createOtp();
       user.signupOtp = hash;
       user.signupOtpExpiry = new Date(Date.now() + OTP_LIFETIME);
       await user.save();
       await sendOtpMail(user.email, otp, "Verify your email");
+      devOtp = otp;
     }
 
-    res.json({ message: "If the account is pending verification, an OTP has been sent" });
+    res.json({
+      message: "If the account is pending verification, an OTP has been sent",
+      otp: process.env.NODE_ENV !== "production" ? devOtp : undefined
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Could not send OTP" });
@@ -249,9 +257,32 @@ const resetPassword = async (req, res) => {
 const me = async (req, res) => {
   try {
     const user = await User.findOne({ email: req.user.email }).select("-password -signupOtp -resetOtp");
-    res.json({ user: user || req.user });
+    const activeUser = user || req.user;
+    const userData = {
+      _id: activeUser._id,
+      id: activeUser._id,
+      name: activeUser.name,
+      email: activeUser.email,
+      role: activeUser.role || "customer",
+    };
+    res.json({
+      success: true,
+      data: userData,
+      user: userData,
+    });
   } catch (error) {
-    res.json({ user: req.user });
+    const fallbackData = {
+      _id: req.user._id,
+      id: req.user._id,
+      name: req.user.name,
+      email: req.user.email,
+      role: req.user.role || "customer",
+    };
+    res.json({
+      success: true,
+      data: fallbackData,
+      user: fallbackData,
+    });
   }
 };
 

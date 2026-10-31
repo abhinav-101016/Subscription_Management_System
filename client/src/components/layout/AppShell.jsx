@@ -1,17 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
 import { CommandPalette } from './CommandPalette';
 import { initSmoothScroll } from '../../lib/lenis';
+import { ErrorBoundary } from '../ui/ErrorBoundary';
 
 export function AppShell() {
   const [collapsed, setCollapsed] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const mainRef = useRef(null);
 
   useEffect(() => {
-    // Initialize Lenis smooth scroll
-    const cleanupLenis = initSmoothScroll();
+    // Initialize Lenis smooth scroll on the scrollable container
+    const cleanupLenis = initSmoothScroll(mainRef.current);
 
     // Global keyboard shortcuts (⌘K for command palette, ⌘B for sidebar toggle)
     const handleKeyDown = (e) => {
@@ -27,7 +29,11 @@ export function AppShell() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => {
-      cleanupLenis();
+      if (typeof cleanupLenis === 'function') {
+        try {
+          cleanupLenis();
+        } catch (_) {}
+      }
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, []);
@@ -42,19 +48,20 @@ export function AppShell() {
         <Topbar onOpenCommandPalette={() => setCommandPaletteOpen(true)} />
 
         {/* Scrollable Content Container */}
-        <main className="flex-1 overflow-y-auto p-6 md:p-8">
+        <main ref={mainRef} className="flex-1 overflow-y-auto p-6 md:p-8">
           <div className="max-w-7xl mx-auto space-y-8">
-            <Outlet />
+            <ErrorBoundary>
+              <Outlet />
+            </ErrorBoundary>
           </div>
         </main>
       </div>
 
-      {/* Command Palette */}
+      {/* Global Command Palette */}
       <CommandPalette
-        open={commandPaletteOpen}
+        isOpen={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
       />
     </div>
   );
 }
-

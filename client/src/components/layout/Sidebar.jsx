@@ -1,187 +1,124 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import {
-  LayoutDashboard,
-  CalendarDays,
-  FileSpreadsheet,
-  Repeat,
-  Receipt,
-  CreditCard,
-  Percent,
-  Sliders,
-  Users,
-  ShieldCheck,
-  ChevronLeft,
-  ChevronRight,
-  ExternalLink,
-} from 'lucide-react';
+import { ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
 import { useAuth } from '../../features/auth/AuthContext';
+import { getNavItemsForRole } from '../../routes/routeConfig';
 import { cn } from '../../lib/utils';
 
 export function Sidebar({ collapsed, onToggle }) {
-  const { user, isAdmin, isStaff, isCustomer, switchRole } = useAuth();
-
-  // Navigation items structured by category and role
-  const navItems = [
-    {
-      label: 'Overview',
-      items: [
-        { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, roles: ['admin', 'staff'] },
-        { name: 'Customer Portal', path: '/portal', icon: ShieldCheck, roles: ['customer'] },
-      ],
-    },
-    {
-      label: 'Lifecycle & Contracts',
-      items: [
-        { name: 'Subscriptions', path: '/subscriptions', icon: Repeat, roles: ['admin', 'staff'] },
-        { name: 'Invoices', path: '/invoices', icon: Receipt, roles: ['admin', 'staff', 'customer'] },
-        { name: 'Payments', path: '/payments', icon: CreditCard, roles: ['admin', 'staff', 'customer'] },
-      ],
-    },
-    {
-      label: 'Billing & Configuration',
-      items: [
-        { name: 'Billing Console', path: '/billing-console', icon: Sliders, roles: ['admin', 'staff'] },
-        { name: 'Plans', path: '/plans', icon: CalendarDays, roles: ['admin', 'staff'] },
-        { name: 'Templates', path: '/templates', icon: FileSpreadsheet, roles: ['admin', 'staff'] },
-        { name: 'Discount Rules', path: '/discounts', icon: Percent, roles: ['admin'] },
-        { name: 'Tax Rules', path: '/taxes', icon: ShieldCheck, roles: ['admin'] },
-      ],
-    },
-    {
-      label: 'Governance',
-      items: [
-        { name: 'Staff Management', path: '/staff', icon: Users, roles: ['admin'] },
-      ],
-    },
-  ];
+  const { user, role, logout } = useAuth();
+  const navItems = getNavItemsForRole(role);
 
   return (
     <aside
       className={cn(
-        'relative flex flex-col h-screen border-r border-[var(--color-border)] bg-[var(--color-surface)] select-none transition-all duration-200 z-30 shrink-0',
-        collapsed ? 'w-16' : 'w-60'
+        'h-screen flex flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] select-none transition-all duration-200 z-30 shrink-0',
+        collapsed ? 'w-16' : 'w-64'
       )}
     >
-      {/* Brand Header */}
-      <div className="h-14 flex items-center justify-between px-4 border-b border-[var(--color-border)]">
-        <NavLink to="/dashboard" className="flex items-center gap-2.5 overflow-hidden">
-          <div className="w-7 h-7 rounded-md bg-[#0D4A38] dark:bg-[#15805D] text-white flex items-center justify-center font-serif-display text-base font-bold tracking-tighter shrink-0">
+      {/* Brand & Workspace Header */}
+      <div className="h-16 flex items-center justify-between px-4 border-b border-[var(--color-border)]">
+        <div className="flex items-center gap-3 overflow-hidden">
+          <div className="w-8 h-8 rounded bg-[var(--color-ink)] text-[var(--color-canvas)] flex items-center justify-center font-serif text-lg font-bold shrink-0">
             C
           </div>
           {!collapsed && (
-            <div className="flex flex-col">
-              <span className="font-semibold text-sm tracking-tight text-[var(--color-ink)] leading-none">
+            <div className="flex flex-col min-w-0">
+              <span className="font-serif-display text-base font-semibold leading-tight text-[var(--color-ink)] truncate">
                 Cadence
               </span>
-              <span className="text-[10px] text-[var(--color-ink-faint)] tracking-wider uppercase mt-0.5">
-                Financial Ops
+              <span className="text-[10px] tracking-wider uppercase font-mono text-[var(--color-ink-muted)] truncate">
+                Financial Ledger
               </span>
             </div>
           )}
-        </NavLink>
+        </div>
 
         <button
           onClick={onToggle}
           title={collapsed ? 'Expand sidebar (⌘B)' : 'Collapse sidebar (⌘B)'}
-          className="p-1 rounded-md text-[var(--color-ink-faint)] hover:text-[var(--color-ink)] hover:bg-[var(--color-canvas-subtle)] transition-colors"
+          className="p-1 rounded text-[var(--color-ink-faint)] hover:text-[var(--color-ink)] hover:bg-[var(--color-surface-hover)] transition-colors"
         >
           {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
         </button>
       </div>
 
-      {/* Navigation List */}
-      <div className="flex-1 overflow-y-auto py-3 px-2 space-y-5">
-        {navItems.map((group) => {
-          const visibleItems = group.items.filter((item) =>
-            item.roles.includes(user?.role || 'admin')
-          );
-          if (visibleItems.length === 0) return null;
-
+      {/* Navigation Links — Driven strictly by routeConfig & authenticated role */}
+      <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-1">
+        {navItems.map((item) => {
+          const Icon = item.icon;
           return (
-            <div key={group.label} className="space-y-1">
-              {!collapsed && (
-                <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-ink-faint)]">
-                  {group.label}
-                </div>
-              )}
-              {visibleItems.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <NavLink
-                    key={item.path}
-                    to={item.path}
-                    title={collapsed ? item.name : undefined}
-                    className={({ isActive }) =>
-                      cn(
-                        'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs font-medium transition-colors group relative',
-                        isActive
-                          ? 'bg-[#0D4A38]/10 text-[#0D4A38] dark:bg-[#15805D]/15 dark:text-[#1BA376] font-semibold'
-                          : 'text-[var(--color-ink-muted)] hover:text-[var(--color-ink)] hover:bg-[var(--color-surface-hover)]'
-                      )
-                    }
-                  >
-                    {({ isActive }) => (
-                      <>
-                        <Icon
-                          className={cn(
-                            'w-4 h-4 shrink-0 transition-colors',
-                            isActive
-                              ? 'text-[#0D4A38] dark:text-[#15805D]'
-                              : 'text-[var(--color-ink-muted)] group-hover:text-[var(--color-ink)]'
-                          )}
-                        />
-                        {!collapsed && <span className="truncate">{item.name}</span>}
-                        {collapsed && isActive && (
-                          <span className="absolute right-1 w-1.5 h-1.5 rounded-full bg-[#0D4A38] dark:bg-[#15805D]" />
-                        )}
-                      </>
+            <NavLink
+              key={item.path}
+              to={item.path}
+              title={collapsed ? item.label : undefined}
+              className={({ isActive }) =>
+                cn(
+                  'flex items-center gap-3 px-3 py-2 rounded-md text-xs font-medium transition-all group relative',
+                  isActive
+                    ? 'text-[var(--color-ink)] bg-[var(--color-canvas)] font-semibold shadow-2xs'
+                    : 'text-[var(--color-ink-muted)] hover:text-[var(--color-ink)] hover:bg-[var(--color-surface-hover)]'
+                )
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  {isActive && (
+                    <span className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-r bg-[var(--color-accent)]" />
+                  )}
+                  <Icon
+                    className={cn(
+                      'w-4 h-4 shrink-0 transition-colors',
+                      isActive ? 'text-[var(--color-accent)]' : 'text-[var(--color-ink-muted)] group-hover:text-[var(--color-ink)]'
                     )}
-                  </NavLink>
-                );
-              })}
-            </div>
+                  />
+                  {!collapsed && <span className="truncate">{item.label}</span>}
+                </>
+              )}
+            </NavLink>
           );
         })}
-      </div>
+      </nav>
 
-      {/* Role Switcher & Persona Card (Live Testing Aid) */}
-      <div className="p-3 border-t border-[var(--color-border)] bg-[var(--color-canvas)]/30">
+      {/* Authenticated Identity & Logout (No persona switchers) */}
+      <div className="p-3 border-t border-[var(--color-border)] bg-[var(--color-canvas-subtle)]/40">
         {!collapsed ? (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] uppercase font-semibold text-[var(--color-ink-faint)]">
-                Active Persona
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-col min-w-0">
+              <span className="text-xs font-medium text-[var(--color-ink)] truncate">
+                {user?.name || user?.email || 'Authenticated User'}
               </span>
-              <span className="text-[10px] font-num px-1.5 py-0.5 rounded bg-[var(--color-canvas-subtle)] text-[var(--color-ink-muted)] border border-[var(--color-border-subtle)] capitalize">
-                {user?.role || 'Guest'}
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] uppercase font-mono tracking-wider px-1 py-0.2 rounded bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-ink-muted)]">
+                  {role}
+                </span>
+                <span className="text-[11px] text-[var(--color-ink-faint)] truncate max-w-[110px]">
+                  {user?.email}
+                </span>
+              </div>
             </div>
-            <div className="grid grid-cols-3 gap-1">
-              {['admin', 'staff', 'customer'].map((r) => (
-                <button
-                  key={r}
-                  onClick={() => switchRole(r)}
-                  className={cn(
-                    'py-1 text-[11px] font-medium rounded border transition-colors capitalize text-center',
-                    user?.role === r
-                      ? 'border-[#0D4A38] dark:border-[#15805D] bg-[#0D4A38]/10 dark:bg-[#15805D]/20 text-[#0D4A38] dark:text-[#1BA376]'
-                      : 'border-[var(--color-border)] text-[var(--color-ink-muted)] hover:text-[var(--color-ink)] hover:bg-[var(--color-surface)]'
-                  )}
-                >
-                  {r}
-                </button>
-              ))}
-            </div>
+            <button
+              onClick={logout}
+              title="Sign out of Cadence"
+              className="p-1.5 rounded text-[var(--color-ink-muted)] hover:text-[var(--color-accent)] hover:bg-[var(--color-surface)] transition-colors shrink-0"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
         ) : (
-          <div className="flex justify-center">
-            <button
-              onClick={() => switchRole(user?.role === 'admin' ? 'staff' : user?.role === 'staff' ? 'customer' : 'admin')}
-              title={`Role: ${user?.role}. Click to cycle.`}
-              className="w-8 h-8 rounded-full border border-[var(--color-border)] bg-[var(--color-canvas-subtle)] text-[var(--color-ink)] text-xs font-semibold uppercase flex items-center justify-center hover:border-[#0D4A38]"
+          <div className="flex flex-col items-center gap-2">
+            <div
+              title={`${user?.name || user?.email} (${role})`}
+              className="w-8 h-8 rounded-full bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-ink)] font-mono text-xs flex items-center justify-center font-bold uppercase"
             >
-              {user?.role?.[0] || 'A'}
+              {(user?.name?.[0] || user?.email?.[0] || 'U').toUpperCase()}
+            </div>
+            <button
+              onClick={logout}
+              title="Sign out"
+              className="p-1.5 rounded text-[var(--color-ink-muted)] hover:text-[var(--color-accent)] transition-colors"
+            >
+              <LogOut className="w-3.5 h-3.5" />
             </button>
           </div>
         )}
@@ -189,4 +126,3 @@ export function Sidebar({ collapsed, onToggle }) {
     </aside>
   );
 }
-

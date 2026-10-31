@@ -1,188 +1,184 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Edit2, Percent, Tag, CheckCircle2 } from 'lucide-react';
-import { apiRequest } from '../../lib/apiClient';
-import { DataTable } from '../../components/ui/DataTable';
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Plus, Edit2, Percent, Tag, Check } from 'lucide-react';
+import { api } from '../../lib/apiClient';
 import { Button } from '../../components/ui/Button';
-import { StatusPill } from '../../components/ui/StatusPill';
-import { DateText } from '../../components/ui/DateText';
 import { MoneyText } from '../../components/ui/MoneyText';
 import { DiscountDrawer } from './DiscountDrawer';
+import { formatDate, formatCurrency } from '../../lib/utils';
 import { useToast } from '../../hooks/useToast';
 
 export default function DiscountsPage() {
-  const [discounts, setDiscounts] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [editingDiscount, setEditingDiscount] = useState(null);
+  const queryClient = useQueryClient();
   const toast = useToast();
 
-  const fetchDiscounts = async () => {
-    setLoading(true);
-    try {
-      const data = await apiRequest('/api/discounts');
-      setDiscounts(data || []);
-    } catch (err) {
-      toast.error('Unable to retrieve discount rules', 'Error');
-    } finally {
-      setLoading(false);
-    }
+  const { data: discounts = [], isLoading } = useQuery({
+    queryKey: ['discounts-list'],
+    queryFn: async () => {
+      const res = await api.get('/api/discounts');
+      return Array.isArray(res) ? res : res?.data || [];
+    },
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: async ({ payload, id }) => {
+      if (id) {
+        return await api.patch(`/api/discounts/${id}`, payload);
+      }
+      return await api.post('/api/discounts', payload);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['discounts-list'] });
+    },
+  });
+
+  const toggleActiveMutation = useMutation({
+    mutationFn: async ({ id, active }) => {
+      return await api.patch(`/api/discounts/${id}`, { active });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['discounts-list'] });
+      toast.success('Discount active state updated');
+    },
+  });
+
+  const handleEdit = (d) => {
+    setEditingDiscount(d);
+    setIsDrawerOpen(true);
   };
 
-  useEffect(() => {
-    fetchDiscounts();
-  }, []);
-
-  const handleSaveDiscount = async (payload, id) => {
-    if (id) {
-      const updated = await apiRequest(`/api/discounts/${id}`, {
-        method: 'PATCH',
-        body: JSON.stringify(payload),
-      });
-      setDiscounts(discounts.map((d) => (d._id === id ? updated : d)));
-    } else {
-      const created = await apiRequest('/api/discounts', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
-      setDiscounts([created, ...discounts]);
-    }
+  const handleCreate = () => {
+    setEditingDiscount(null);
+    setIsDrawerOpen(true);
   };
-
-  const columns = [
-    {
-      header: 'Rule Name',
-      key: 'name',
-      sortable: true,
-      render: (row) => (
-        <div>
-          <span className="font-semibold text-xs text-[var(--color-ink)]">
-            {row.name}
-          </span>
-          <div className="text-[11px] text-[var(--color-ink-faint)]">
-            Min amount: ${row.min_purchase_amount || 0} • Min qty: {row.min_quantity || 1}
-          </div>
-        </div>
-      ),
-    },
-    {
-      header: 'Value / Type',
-      key: 'value',
-      sortable: true,
-      render: (row) => (
-        <span className="font-num text-xs font-semibold text-[var(--color-ink)]">
-          {row.type === 'Percentage' ? `${row.value}% Off` : `$${row.value} Off`}
-        </span>
-      ),
-    },
-    {
-      header: 'Applicability',
-      key: 'applicability',
-      render: (row) => (
-        <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-[var(--color-canvas-subtle)] border border-[var(--color-border)]">
-          {row.applicability === 'Whole_Subscription' ? 'Whole Subscription' : 'Target Product'}
-        </span>
-      ),
-    },
-    {
-      header: 'Usage Progress',
-      key: 'usage',
-      render: (row) => {
-        const used = row.times_used || 0;
-        const limit = row.usage_limit || 100;
-        const percentage = Math.min(100, Math.round((used / limit) * 100));
-
-        return (
-          <div className="w-36 space-y-1">
-            <div className="flex justify-between text-[11px] font-num">
-              <span>{used} / {limit}</span>
-              <span className="text-[var(--color-ink-faint)]">{percentage}%</span>
-            </div>
-            <div className="w-full h-1.5 rounded-full bg-[var(--color-canvas-subtle)] border border-[var(--color-border-subtle)] overflow-hidden">
-              <div
-                className="h-full bg-[#0D4A38] dark:bg-[#15805D] rounded-full transition-all duration-300"
-                style={{ width: `${percentage}%` }}
-              />
-            </div>
-          </div>
-        );
-      },
-    },
-    {
-      header: 'Validity Period',
-      key: 'validity',
-      render: (row) => (
-        <div className="text-xs">
-          <DateText date={row.valid_from} format="short" />
-          <span className="text-[var(--color-ink-faint)] mx-1">→</span>
-          {row.valid_to ? (
-            <DateText date={row.valid_to} format="short" />
-          ) : (
-            <span className="text-[var(--color-ink-faint)] italic">No expiry</span>
-          )}
-        </div>
-      ),
-    },
-    {
-      header: 'Actions',
-      key: 'actions',
-      render: (row) => (
-        <Button
-          variant="ghost"
-          size="xs"
-          onClick={() => {
-            setEditingDiscount(row);
-            setIsDrawerOpen(true);
-          }}
-          icon={Edit2}
-        >
-          Edit
-        </Button>
-      ),
-    },
-  ];
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-200">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-6 text-[var(--color-ink)]">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[var(--color-border)]">
         <div>
-          <h1 className="font-serif-display text-2xl md:text-3xl font-medium tracking-tight text-[var(--color-ink)]">
-            Discount Rules Engine
+          <h1 className="font-serif-display text-3xl font-normal tracking-tight">
+            Discount Rules & Deductions
           </h1>
-          <p className="text-xs text-[var(--color-ink-muted)] mt-1">
-            Automated constraints: usage caps, threshold amounts, product targets, and validity windows.
+          <p className="text-xs text-[var(--color-ink-muted)] font-mono mt-0.5">
+            Configure percentage and fixed price promotional reductions applied at billing.
           </p>
         </div>
 
-        <Button
-          onClick={() => {
-            setEditingDiscount(null);
-            setIsDrawerOpen(true);
-          }}
-          icon={Plus}
-        >
+        <Button variant="primary" onClick={handleCreate} icon={Plus}>
           New Discount Rule
         </Button>
       </div>
 
-      <DataTable
-        columns={columns}
-        data={discounts}
-        loading={loading}
-        onRowClick={(row) => {
-          setEditingDiscount(row);
-          setIsDrawerOpen(true);
-        }}
-        emptyTitle="No discount rules defined"
-        emptyDescription="Create custom incentives to apply against automated recurring invoices."
-      />
+      {/* Ruled Dense Table */}
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl overflow-hidden shadow-2xs">
+        {isLoading ? (
+          <div className="p-8 text-center text-xs text-[var(--color-ink-muted)] font-mono">
+            Loading discount rules...
+          </div>
+        ) : discounts.length === 0 ? (
+          <div className="p-12 text-center text-xs text-[var(--color-ink-muted)] space-y-3">
+            <p>No discount rules configured yet.</p>
+            <Button variant="secondary" size="xs" onClick={handleCreate}>
+              Create a Discount
+            </Button>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-[var(--color-canvas)] border-b border-[var(--color-border)] font-mono uppercase text-[10px] text-[var(--color-ink-muted)]">
+                <tr>
+                  <th className="py-2.5 px-6">Rule Code / Name</th>
+                  <th className="py-2.5 px-4">Type & Value</th>
+                  <th className="py-2.5 px-4">Applicability Scope</th>
+                  <th className="py-2.5 px-4">Usage Progress</th>
+                  <th className="py-2.5 px-4">Active</th>
+                  <th className="py-2.5 px-6 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--color-border)]">
+                {discounts.map((d) => {
+                  const used = d.times_used || 0;
+                  const limit = d.usage_limit || 100;
+                  const percentUsed = Math.min(100, Math.round((used / limit) * 100));
+
+                  return (
+                    <tr key={d._id} className="hover:bg-[var(--color-surface-hover)] transition-colors">
+                      <td className="py-3 px-6">
+                        <span className="font-mono font-bold text-[var(--color-ink)] block">
+                          {d.name}
+                        </span>
+                        <span className="text-[10px] font-mono text-[var(--color-ink-faint)]">
+                          Valid: {formatDate(d.valid_from, 'short')} – {d.valid_to ? formatDate(d.valid_to, 'short') : 'Perpetual'}
+                        </span>
+                      </td>
+
+                      <td className="py-3 px-4 font-mono font-semibold">
+                        {d.type === 'Percentage' ? `${d.value}%` : formatCurrency(d.value)}
+                      </td>
+
+                      <td className="py-3 px-4">
+                        <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-[var(--color-canvas)] border border-[var(--color-border)]">
+                          {d.applicability === 'Specific_Product' ? 'Specific Product' : 'Whole Contract'}
+                        </span>
+                      </td>
+
+                      {/* Usage Progress Bar */}
+                      <td className="py-3 px-4 w-48">
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-[10px] font-mono text-[var(--color-ink-muted)]">
+                            <span>{used} used</span>
+                            <span>{limit} max</span>
+                          </div>
+                          <div className="w-full h-1.5 rounded-full bg-[var(--color-canvas)] border border-[var(--color-border)] overflow-hidden">
+                            <div
+                              style={{ width: `${percentUsed}%` }}
+                              className={`h-full ${percentUsed >= 100 ? 'bg-[var(--color-accent)]' : 'bg-emerald-600'}`}
+                            />
+                          </div>
+                        </div>
+                      </td>
+
+                      <td className="py-3 px-4">
+                        <button
+                          onClick={() => toggleActiveMutation.mutate({ id: d._id, active: !d.active })}
+                          className={`text-[11px] font-mono font-semibold px-2 py-0.5 rounded border transition-colors ${
+                            d.active !== false
+                              ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400'
+                              : 'border-[var(--color-border)] text-[var(--color-ink-faint)] bg-[var(--color-canvas)]'
+                          }`}
+                        >
+                          {d.active !== false ? 'Active' : 'Disabled'}
+                        </button>
+                      </td>
+
+                      <td className="py-3 px-6 text-right">
+                        <button
+                          onClick={() => handleEdit(d)}
+                          className="text-xs text-[var(--color-accent)] hover:underline font-medium inline-flex items-center gap-1"
+                        >
+                          <Edit2 className="w-3 h-3" /> Edit
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       <DiscountDrawer
         open={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
-        onSave={handleSaveDiscount}
         initialData={editingDiscount}
+        onSave={async (payload, id) => {
+          await saveMutation.mutateAsync({ payload, id });
+        }}
       />
     </div>
   );
 }
-

@@ -2,41 +2,61 @@
 
 @layer base {
   :root {
-    --color-canvas: #FAFAF7;
-    --color-canvas-subtle: #F3F3EC;
+    --color-canvas: #F6F3EC;
+    --color-canvas-subtle: #EFEBE2;
     --color-surface: #FFFFFF;
-    --color-surface-hover: #F7F7F2;
-    --color-surface-active: #ECECE5;
-    --color-border: #E6E5DC;
-    --color-border-subtle: #EFEFE8;
-    --color-ink: #141413;
-    --color-ink-muted: #6B6A63;
-    --color-ink-faint: #9E9C93;
+    --color-surface-hover: #FAF7F0;
+    --color-surface-active: #F2EDE2;
+    --color-border: #E4DFD3;
+    --color-border-subtle: #EBE6DA;
+    --color-ink: #17160F;
+    --color-ink-muted: #6B685E;
+    --color-ink-faint: #A39F93;
 
-    --color-accent: #0D4A38;
-    --color-accent-hover: #083427;
-    --color-accent-tint: #EBF4F0;
-    --color-accent-border: #BCD9CE;
+    /* The Ledger Signature Oxblood Accent */
+    --color-accent: #B3361F;
+    --color-accent-hover: #962B17;
+    --color-accent-tint: #FDF1EE;
+    --color-accent-border: #F3C4BA;
     --color-accent-text: #FFFFFF;
+
+    /* Restrained Status Palette */
+    --color-status-active: #2A6B48;
+    --color-status-active-bg: #EDF5F0;
+    --color-status-pending: #A06A18;
+    --color-status-pending-bg: #FAF4E8;
+    --color-status-draft: #5A6270;
+    --color-status-draft-bg: #F0F2F5;
+    --color-status-overdue: #A32A2A;
+    --color-status-overdue-bg: #FDF0F0;
   }
 
   [data-theme="dark"] {
-    --color-canvas: #0C0C0B;
-    --color-canvas-subtle: #121211;
-    --color-surface: #171716;
-    --color-surface-hover: #1F1F1D;
-    --color-surface-active: #272724;
-    --color-border: #262624;
-    --color-border-subtle: #1C1C1A;
-    --color-ink: #EDEDEA;
-    --color-ink-muted: #94938B;
-    --color-ink-faint: #63625C;
+    --color-canvas: #0E0F0C;
+    --color-canvas-subtle: #151612;
+    --color-surface: #1B1D17;
+    --color-surface-hover: #22241D;
+    --color-surface-active: #292B23;
+    --color-border: #2B2E24;
+    --color-border-subtle: #20221A;
+    --color-ink: #E9E5D8;
+    --color-ink-muted: #9E998B;
+    --color-ink-faint: #636055;
 
-    --color-accent: #15805D;
-    --color-accent-hover: #1BA376;
-    --color-accent-tint: #08281D;
-    --color-accent-border: #0F4C37;
+    --color-accent: #D4482E;
+    --color-accent-hover: #E8563A;
+    --color-accent-tint: #2E1510;
+    --color-accent-border: #5C2216;
     --color-accent-text: #FFFFFF;
+
+    --color-status-active: #48A370;
+    --color-status-active-bg: #142E1F;
+    --color-status-pending: #D49835;
+    --color-status-pending-bg: #33230A;
+    --color-status-draft: #8B94A0;
+    --color-status-draft-bg: #1C2026;
+    --color-status-overdue: #E05353;
+    --color-status-overdue-bg: #381414;
   }
 
   * {
@@ -51,11 +71,18 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+
+  /* Designed Focus Ring */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
 }
 
-/* Custom Typography Helpers */
+/* Typography Hierarchy */
 .font-serif-display {
-  font-family: 'Instrument Serif', Georgia, serif;
+  font-family: 'Fraunces', 'Instrument Serif', Georgia, serif;
+  font-feature-settings: "opsz" 32;
   letter-spacing: -0.02em;
 }
 
@@ -64,9 +91,40 @@
 }
 
 .font-num {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-variant-numeric: tabular-nums;
+  font-family: 'JetBrains Mono', 'Geist Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums slashed-zero;
   letter-spacing: -0.02em;
+}
+
+/* Subtle Paper Texture Noise */
+.paper-texture {
+  background-image: radial-gradient(rgba(23, 22, 15, 0.03) 1px, transparent 0);
+  background-size: 24px 24px;
+}
+
+[data-theme="dark"] .paper-texture {
+  background-image: radial-gradient(rgba(233, 229, 216, 0.03) 1px, transparent 0);
+}
+
+/* Paid & Overdue Watermark Stamp */
+.stamp-paid {
+  border: 2px solid #2A6B48;
+  color: #2A6B48;
+  transform: rotate(-8deg);
+  text-transform: uppercase;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  opacity: 0.85;
+}
+
+.stamp-overdue {
+  border: 2px solid #A32A2A;
+  color: #A32A2A;
+  transform: rotate(-8deg);
+  text-transform: uppercase;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  opacity: 0.85;
 }
 
 /* Print Invoice Stylesheet */
@@ -81,32 +139,4 @@
   .print-only {
     display: block !important;
   }
-  .printable-document {
-    box-shadow: none !important;
-    border: none !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    max-width: 100% !important;
-  }
-}
-
-/* House easing curve */
-.ease-house {
-  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-/* Custom Scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: var(--color-border);
-  border-radius: 9999px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-ink-faint);
 }

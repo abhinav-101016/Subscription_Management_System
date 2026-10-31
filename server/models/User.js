@@ -20,4 +20,11 @@ const userSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-module.exports = mongoose.model("User", userSchema);
+const User = mongoose.model("User", userSchema);
+
+// Register alias for 'Customer' so that populate('customer_id') works seamlessly across both model references
+if (!mongoose.models.Customer) {
+  mongoose.model("Customer", userSchema);
+}
+
+module.exports = User;

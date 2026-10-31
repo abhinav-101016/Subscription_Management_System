@@ -156,7 +156,11 @@ const getAllInvoices = async (req, res) => {
       filter.subscription_id = req.query.subscription_id;
     }
 
+    if (req.user && req.user.role === 'customer') {
+      filter.customer_id = req.user._id || req.user.id;
+    }
     const invoices = await Invoice.find(filter)
+      .populate('customer_id', 'name email phone')
       .populate('subscription_id', 'subscription_number status payment_terms')
       .sort({ createdAt: -1 });
 
@@ -191,10 +195,9 @@ const getInvoiceById = async (req, res) => {
       });
     }
 
-    const invoice = await Invoice.findById(id).populate(
-      'subscription_id',
-      'subscription_number status payment_terms lines'
-    );
+    const invoice = await Invoice.findById(id)
+      .populate('customer_id', 'name email phone')
+      .populate('subscription_id', 'subscription_number status payment_terms lines');
 
     if (!invoice) {
       return res.status(404).json({

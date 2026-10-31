@@ -1,157 +1,136 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { apiRequest } from '../../lib/apiClient';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { api } from '../../lib/apiClient';
 
 const AuthContext = createContext(null);
-
-const DEFAULT_DEMO_USER = {
-  _id: 'usr_demo_admin_01',
-  name: 'Alexander Hamilton',
-  email: 'alexander@mercury-holdings.co',
-  role: 'admin',
-};
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
     try {
       const stored = localStorage.getItem('cadence_user');
-      if (stored) return JSON.parse(stored);
+      return stored ? JSON.parse(stored) : null;
     } catch {
-      // Ignore JSON error
+      return null;
     }
-    // Default to admin for seamless evaluation
-    return DEFAULT_DEMO_USER;
   });
 
-  const [token, setToken] = useState(() => localStorage.getItem('cadence_token') || 'demo_jwt_token_admin');
-  const [loading, setLoading] = useState(false);
+  const [token, setToken] = useState(() => localStorage.getItem('cadence_token') || null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    if (user) {
-      localStorage.setItem('cadence_user', JSON.stringify(user));
-    } else {
-      localStorage.removeItem('cadence_user');
+  // Rehydrate identity honestly from GET /api/auth/me using real JWT
+  const rehydrate = useCallback(async () => {
+    const activeToken = localStorage.getItem('cadence_token');
+    if (!activeToken) {
+      setUser(null);
+      setIsLoading(false);
+      return;
     }
-  }, [user]);
 
-  useEffect(() => {
-    if (token) {
-      localStorage.setItem('cadence_token', token);
-    } else {
+    try {
+      const res = await api.get('/api/auth/me');
+      const currentUser = res?.user || res?.data || res;
+      if (currentUser && (currentUser._id || currentUser.id || currentUser.email)) {
+        setUser(currentUser);
+        localStorage.setItem('cadence_user', JSON.stringify(currentUser));
+      } else {
+        throw new Error('Invalid user payload');
+      }
+    } catch (err) {
+      console.warn('Session verification failed, logging out:', err.message);
       localStorage.removeItem('cadence_token');
-    }
-  }, [token]);
-
-  useEffect(() => {
-    const handleLogout = () => {
+      localStorage.removeItem('cadence_user');
       setUser(null);
       setToken(null);
-    };
-    window.addEventListener('cadence-auth-logout', handleLogout);
-    return () => window.removeEventListener('cadence-auth-logout', handleLogout);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
+  useEffect(() => {
+    rehydrate();
+  }, [rehydrate]);
+
   const login = async (email, password) => {
-    setLoading(true);
+    setIsLoading(true);
     try {
-      const data = await apiRequest('/api/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ email, password }),
-      });
-      setUser(data.user);
-      setToken(data.token);
-      return data;
+      const data = await api.post('/api/auth/login', { email, password });
+      const receivedToken = data.token;
+      const receivedUser = data.user;
+
+      if (!receivedToken || !receivedUser) {
+        throw new Error('Server returned invalid authentication payload');
+      }
+
+      localStorage.setItem('cadence_token', receivedToken);
+      localStorage.setItem('cadence_user', JSON.stringify(receivedUser));
+      setToken(receivedToken);
+      setUser(receivedUser);
+      return { token: receivedToken, user: receivedUser };
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 
   const signup = async (userData) => {
-    setLoading(true);
-    try {
-      const data = await apiRequest('/api/auth/signup', {
-        method: 'POST',
-        body: JSON.stringify(userData),
-      });
-      return data;
-    } finally {
-      setLoading(false);
-    }
+    return await api.post('/api/auth/signup', userData);
   };
 
   const verifyOtp = async (email, otp) => {
-    setLoading(true);
-    try {
-      let data;
-      try {
-        data = await apiRequest('/api/auth/verify-signup', {
-          method: 'POST',
-          body: JSON.stringify({ email, otp }),
-        });
-      } catch {
-        data = await apiRequest('/api/auth/verify-otp', {
-          method: 'POST',
-          body: JSON.stringify({ email, otp }),
-        });
-      }
-      if (data.token) {
-        setToken(data.token);
-        setUser(data.user);
-      }
-      return data;
-    } finally {
-      setLoading(false);
+    const res = await api.post('/api/auth/verify-signup', { email, otp });
+    const receivedToken = res?.token;
+    const receivedUser = res?.user;
+    if (receivedToken && receivedUser) {
+      localStorage.setItem('cadence_token', receivedToken);
+      localStorage.setItem('cadence_user', JSON.stringify(receivedUser));
+      setToken(receivedToken);
+      setUser(receivedUser);
     }
+    return res;
+  };
+
+  const resendOtp = async (email) => {
+    return await api.post('/api/auth/resend-signup-otp', { email });
+  };
+
+  const forgotPassword = async (email) => {
+    return await api.post('/api/auth/forgot-password', { email });
+  };
+
+  const resetPassword = async (email, otp, new_password) => {
+    return await api.post('/api/auth/reset-password', { email, otp, new_password });
   };
 
   const logout = () => {
+    localStorage.removeItem('cadence_token');
+    localStorage.removeItem('cadence_user');
     setUser(null);
     setToken(null);
-    localStorage.removeItem('cadence_user');
-    localStorage.removeItem('cadence_token');
+    window.location.href = '/login';
   };
 
-  // Live Role Switcher for instant testing across personas
-  const switchRole = (newRole) => {
-    if (!['admin', 'staff', 'customer'].includes(newRole)) return;
-    const roleProfiles = {
-      admin: {
-        _id: 'usr_demo_admin_01',
-        name: 'Alexander Hamilton',
-        email: 'alexander@mercury-holdings.co',
-        role: 'admin',
-      },
-      staff: {
-        _id: 'usr_demo_staff_01',
-        name: 'Elena Rostova',
-        email: 'elena@cadence.finance',
-        role: 'staff',
-      },
-      customer: {
-        _id: 'usr_demo_cust_01',
-        name: 'Sarah Jenkins',
-        email: 'sarah@acme-corp.com',
-        role: 'customer',
-      },
-    };
-    setUser(roleProfiles[newRole]);
-  };
+  const role = user?.role || 'customer';
+  const isAuthenticated = !!token && !!user;
 
-  const value = {
-    user,
-    token,
-    loading,
-    isAuthenticated: Boolean(user),
-    isAdmin: user?.role === 'admin',
-    isStaff: user?.role === 'staff' || user?.role === 'admin',
-    isCustomer: user?.role === 'customer',
-    login,
-    signup,
-    verifyOtp,
-    logout,
-    switchRole,
-  };
-
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider
+      value={{
+        user,
+        token,
+        role,
+        isAuthenticated,
+        isLoading,
+        login,
+        signup,
+        verifyOtp,
+        resendOtp,
+        forgotPassword,
+        resetPassword,
+        logout,
+        rehydrate,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
 export function useAuth() {
@@ -161,4 +140,3 @@ export function useAuth() {
   }
   return context;
 }
-

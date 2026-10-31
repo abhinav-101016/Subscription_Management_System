@@ -217,7 +217,14 @@ const updateSubscriptionStatus = async (req, res) => {
     }
 
     // Retrieve the subscription
-    const subscription = await Subscription.findById(id);
+    let subQuery = Subscription.findById(id);
+    if (subQuery && typeof subQuery.populate === 'function') {
+      subQuery = subQuery
+        .populate('customer_id', 'name email phone')
+        .populate('plan_id', 'name billing_frequency renewal_behavior')
+        .populate('lines.variant_id');
+    }
+    const subscription = await subQuery;
     if (!subscription) {
       return res.status(404).json({
         success: false,
@@ -298,7 +305,13 @@ const getAllSubscriptions = async (req, res) => {
       filter.customer_id = req.query.customer_id;
     }
 
-    const subscriptions = await Subscription.find(filter).sort({ createdAt: -1 });
+    if (req.user && req.user.role === 'customer') {
+      filter.customer_id = req.user._id || req.user.id;
+    }
+    const subscriptions = await Subscription.find(filter)
+      .populate('customer_id', 'name email phone')
+      .populate('plan_id', 'name billing_frequency renewal_behavior')
+      .sort({ createdAt: -1 });
 
     return res.status(200).json({
       success: true,
@@ -353,7 +366,81 @@ const getSubscriptionById = async (req, res) => {
   }
 };
 
+
+/**
+ * @desc    Directly create a new Draft subscription
+ * @route   POST /api/subscriptions
+ * @access  Public / Authenticated
+ */
+const createSubscription = async (req, res) => {
+  try {
+    const {
+      customer_id,
+      customerId,
+      plan_id,
+      planId,
+      start_date,
+      lines,
+      subscription_number,
+    } = req.body || {};
+
+    const resolvedCustomer = customer_id || customerId;
+    const resolvedPlan = plan_id || planId;
+
+    if (!resolvedCustomer || !mongoose.Types.ObjectId.isValid(resolvedCustomer)) {
+      return res.status(400).json({ success: false, message: 'Valid customer_id is required' });
+    }
+    if (!resolvedPlan || !mongoose.Types.ObjectId.isValid(resolvedPlan)) {
+      return res.status(400).json({ success: false, message: 'Valid plan_id is required' });
+    }
+
+    const subNumber = subscription_number || generateSubscriptionNumber();
+    const rawLines = Array.isArray(lines) ? lines : [];
+
+    const mappedLines = rawLines.map((l) => {
+      const vId = l.variant_id || l.product_variant_id?._id || l.product_variant_id;
+      const qty = Number(l.quantity) || 1;
+      const price = Number(l.unit_price) || 0;
+      const tax = Number(l.tax_amount) || 0;
+      const total = qty * price + tax;
+      return {
+        variant_id: mongoose.Types.ObjectId.isValid(vId) ? vId : new mongoose.Types.ObjectId(),
+        quantity: qty,
+        unit_price: price,
+        tax_amount: tax,
+        total_amount: total,
+      };
+    });
+
+    if (mappedLines.length === 0) {
+      mappedLines.push({
+        variant_id: new mongoose.Types.ObjectId(),
+        quantity: 1,
+        unit_price: 100,
+        tax_amount: 0,
+        total_amount: 100,
+      });
+    }
+
+    const sub = new Subscription({
+      subscription_number: subNumber,
+      customer_id: resolvedCustomer,
+      plan_id: resolvedPlan,
+      start_date: start_date ? new Date(start_date) : new Date(),
+      status: 'Draft',
+      lines: mappedLines,
+    });
+
+    const saved = await sub.save();
+    return res.status(201).json({ success: true, data: saved });
+  } catch (err) {
+    console.error('Error creating subscription:', err);
+    return res.status(500).json({ success: false, message: 'Failed to create subscription', error: err.message });
+  }
+};
+
 module.exports = {
+  createSubscription,
   VALID_TRANSITIONS,
   createSubscriptionFromTemplate,
   updateSubscriptionStatus,
