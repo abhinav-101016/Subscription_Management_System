@@ -75,6 +75,11 @@ const invoiceSchema = new mongoose.Schema(
       min: [0, 'subtotal cannot be negative'],
       default: 0,
     },
+    discount_total: {
+      type: Number,
+      default: 0,
+      min: [0, 'discount_total cannot be negative'],
+    },
     tax_total: {
       type: Number,
       required: [true, 'tax_total is required'],
@@ -105,6 +110,27 @@ const invoiceSchema = new mongoose.Schema(
       name: String,
       percentage_rate: Number,
     },
+    discount_applied: {
+      discount_rule_id: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'DiscountRule',
+      },
+      name: String,
+      type: {
+        type: String,
+        enum: ['Fixed', 'Percentage'],
+      },
+      value: Number,
+      amount: Number,
+      applicability: {
+        type: String,
+        enum: ['Specific_Product', 'Whole_Subscription'],
+      },
+      applied_at: {
+        type: Date,
+        default: Date.now,
+      },
+    },
   },
   {
     timestamps: true,
@@ -123,4 +149,3 @@ module.exports = {
   Invoice,
   INVOICE_STATUSES,
 };
-
