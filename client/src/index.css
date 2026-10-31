@@ -1,1 +1,112 @@
 @import "tailwindcss";
+
+@layer base {
+  :root {
+    --color-canvas: #FAFAF7;
+    --color-canvas-subtle: #F3F3EC;
+    --color-surface: #FFFFFF;
+    --color-surface-hover: #F7F7F2;
+    --color-surface-active: #ECECE5;
+    --color-border: #E6E5DC;
+    --color-border-subtle: #EFEFE8;
+    --color-ink: #141413;
+    --color-ink-muted: #6B6A63;
+    --color-ink-faint: #9E9C93;
+
+    --color-accent: #0D4A38;
+    --color-accent-hover: #083427;
+    --color-accent-tint: #EBF4F0;
+    --color-accent-border: #BCD9CE;
+    --color-accent-text: #FFFFFF;
+  }
+
+  [data-theme="dark"] {
+    --color-canvas: #0C0C0B;
+    --color-canvas-subtle: #121211;
+    --color-surface: #171716;
+    --color-surface-hover: #1F1F1D;
+    --color-surface-active: #272724;
+    --color-border: #262624;
+    --color-border-subtle: #1C1C1A;
+    --color-ink: #EDEDEA;
+    --color-ink-muted: #94938B;
+    --color-ink-faint: #63625C;
+
+    --color-accent: #15805D;
+    --color-accent-hover: #1BA376;
+    --color-accent-tint: #08281D;
+    --color-accent-border: #0F4C37;
+    --color-accent-text: #FFFFFF;
+  }
+
+  * {
+    border-color: var(--color-border);
+  }
+
+  html {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: var(--color-ink);
+    background-color: var(--color-canvas);
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Custom Typography Helpers */
+.font-serif-display {
+  font-family: 'Instrument Serif', Georgia, serif;
+  letter-spacing: -0.02em;
+}
+
+.font-ui {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.font-num {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* Print Invoice Stylesheet */
+@media print {
+  body {
+    background-color: #FFFFFF !important;
+    color: #000000 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  .printable-document {
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+  }
+}
+
+/* House easing curve */
+.ease-house {
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-faint);
+}

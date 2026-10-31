@@ -2,11 +2,33 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%230D4A38'><rect width='24' height='24' rx='5' fill='%230D4A38'/><circle cx='12' cy='12' r='4' fill='%23FAFAF7'/></svg>" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>client</title>
+    <title>Cadence — Recurring Revenue & Subscription Management</title>
+
+    <!-- Typography: Self-hosted / Preconnected with font-display: swap -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+    <!-- Anti-flash theme initialization -->
+    <script>
+      (function() {
+        try {
+          var savedTheme = localStorage.getItem('cadence-theme');
+          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var theme = savedTheme ? savedTheme : (prefersDark ? 'dark' : 'light');
+          document.documentElement.setAttribute('data-theme', theme);
+          if (theme === 'dark') {
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
-  <body>
+  <body class="bg-canvas text-ink antialiased selection:bg-emerald-900/15 selection:text-emerald-950 dark:selection:bg-emerald-400/20 dark:selection:text-emerald-200">
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
