@@ -139,7 +139,7 @@ export default function VerifyOtpPage() {
           </p>
         </div>
 
-        {/* Development Helper Badge */}
+        {/* Development Helper Badge
         {devOtp && (
           <div className="p-2.5 rounded-lg border border-[var(--color-accent-border)] bg-[var(--color-accent-tint)] flex items-center justify-between text-xs text-[var(--color-accent)]">
             <div className="flex items-center gap-1.5 font-mono">
@@ -154,7 +154,7 @@ export default function VerifyOtpPage() {
               Auto-fill
             </button>
           </div>
-        )}
+        )} */}
 
         {serverError && (
           <div className="p-3 rounded border border-[var(--color-accent-border)] bg-[var(--color-accent-tint)] text-xs text-[var(--color-accent)] font-medium">

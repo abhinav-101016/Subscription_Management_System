@@ -217,10 +217,14 @@ const updateSubscriptionStatus = async (req, res) => {
     }
 
     // Retrieve the subscription
-    const subscription = await Subscription.findById(id)
-      .populate('customer_id', 'name email phone')
-      .populate('plan_id', 'name billing_frequency renewal_behavior')
-      .populate('lines.variant_id');
+    let subQuery = Subscription.findById(id);
+    if (subQuery && typeof subQuery.populate === 'function') {
+      subQuery = subQuery
+        .populate('customer_id', 'name email phone')
+        .populate('plan_id', 'name billing_frequency renewal_behavior')
+        .populate('lines.variant_id');
+    }
+    const subscription = await subQuery;
     if (!subscription) {
       return res.status(404).json({
         success: false,
