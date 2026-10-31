@@ -92,7 +92,14 @@ const verifySignup = async (req, res) => {
     res.json({
       message: "Email verified",
       token: generateToken(user),
-      user: { name: user.name, email: user.email, role: user.role }
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        staffId: user.staffId,
+        loginId: user.loginId
+      }
     });
   } catch (error) {
     console.error(error);
@@ -127,13 +134,21 @@ const resendSignupOtp = async (req, res) => {
 
 const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, loginId, identifier: rawId, password } = req.body;
+    const identifier = (email || loginId || rawId || "").trim();
 
-    if (!email || !password) {
-      return res.status(400).json({ message: "Email and password are required" });
+    if (!identifier || !password) {
+      return res.status(400).json({ message: "Email/Login ID and password are required" });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() });
+    const user = await User.findOne({
+      $or: [
+        { email: identifier.toLowerCase() },
+        { loginId: identifier.toLowerCase() },
+        { staffId: identifier.toUpperCase() }
+      ]
+    });
+
     if (!user) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
@@ -143,6 +158,10 @@ const login = async (req, res) => {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
+    if (user.isActive === false) {
+      return res.status(403).json({ message: "Account is deactivated. Please contact admin." });
+    }
+
     if (user.isVerified === false) {
       return res.status(403).json({ message: "Please verify your email first" });
     }
@@ -150,7 +169,15 @@ const login = async (req, res) => {
     res.json({
       message: "Login successful",
       token: generateToken(user),
-      user: { name: user.name, email: user.email, role: user.role }
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        staffId: user.staffId,
+        loginId: user.loginId,
+        department: user.department
+      }
     });
   } catch (error) {
     console.error(error);
@@ -219,8 +246,13 @@ const resetPassword = async (req, res) => {
   }
 };
 
-const me = (req, res) => {
-  res.json({ user: req.user });
+const me = async (req, res) => {
+  try {
+    const user = await User.findOne({ email: req.user.email }).select("-password -signupOtp -resetOtp");
+    res.json({ user: user || req.user });
+  } catch (error) {
+    res.json({ user: req.user });
+  }
 };
 
 module.exports = { signup, verifySignup, resendSignupOtp, login, forgotPassword, resetPassword, me };
