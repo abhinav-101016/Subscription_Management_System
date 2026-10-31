@@ -29,7 +29,7 @@ const sendOtpMail = async (to, otp, subject = "Your Cadence verification OTP") =
 
     const mailFrom = process.env.MAIL_FROM && process.env.MAIL_FROM.includes("@")
       ? process.env.MAIL_FROM
-      : "admin@example.com";
+      : "prajitsingh05@gmail.com";
 
     const formattedFrom = `"${process.env.ADMIN_NAME || "Cadence Finance"}" <${mailFrom}>`;
 

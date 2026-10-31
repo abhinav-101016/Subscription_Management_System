@@ -21,9 +21,9 @@ export default function SignupPage() {
     e.preventDefault();
     setLoading(true);
     try {
-      await signup(formData);
+      const res = await signup(formData);
       toast.success('Registration code dispatched to your email', 'Account Created');
-      navigate('/verify-otp', { state: { email: formData.email } });
+      navigate('/verify-otp', { state: { email: formData.email, otp: res?.otp } });
     } catch (err) {
       toast.error(err.message || 'Signup failed', 'Registration Error');
     } finally {
