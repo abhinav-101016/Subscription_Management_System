@@ -4,6 +4,8 @@ const {
   createPlan,
   getAllPlans,
   getPlanById,
+  updatePlan,
+  deletePlan,
 } = require('../controllers/planController');
 
 // POST /api/plans - Admin creates a new plan
@@ -13,8 +15,11 @@ router.route('/')
   .get(getAllPlans);
 
 // GET /api/plans/:id - Get plan by ID
+// PUT /api/plans/:id - Update plan
+// DELETE /api/plans/:id - Delete or deactivate plan
 router.route('/:id')
-  .get(getPlanById);
+  .get(getPlanById)
+  .put(updatePlan)
+  .delete(deletePlan);
 
 module.exports = router;
-

@@ -7,6 +7,7 @@ dotenv.config();
 
 const authRoutes = require('./routes/authRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const productRoutes = require('./routes/productRoutes');
 const planRoutes = require('./routes/planRoutes');
 const templateRoutes = require('./routes/templateRoutes');
 const subscriptionRoutes = require('./routes/subscriptionRoutes');
@@ -36,6 +37,7 @@ app.get('/health', (req, res) => {
 // Mount Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/products', productRoutes);
 app.use('/api/plans', planRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
