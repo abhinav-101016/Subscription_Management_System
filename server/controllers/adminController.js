@@ -1,5 +1,6 @@
 const bcrypt = require("bcryptjs");
 const User = require("../models/User");
+const validatePassword = require("../utils/validatePassword");
 
 const createStaff = async (req, res) => {
   try {
@@ -9,8 +10,9 @@ const createStaff = async (req, res) => {
       return res.status(400).json({ message: "Name, email and password are required" });
     }
 
-    if (password.length < 6) {
-      return res.status(400).json({ message: "Password must be at least 6 characters" });
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      return res.status(400).json({ message: passwordError });
     }
 
     const existing = await User.findOne({ email: email.toLowerCase() });
@@ -19,7 +21,7 @@ const createStaff = async (req, res) => {
     }
 
     const hashed = await bcrypt.hash(password, 10);
-    const staff = await User.create({ name, email, password: hashed, role: "staff" });
+    const staff = await User.create({ name, email, password: hashed, role: "staff", isVerified: true });
 
     res.status(201).json({
       message: "Staff created",
