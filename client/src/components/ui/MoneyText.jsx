@@ -13,3 +13,4 @@ export function MoneyText({ amount, currency = 'USD', className, showSign = fals
     </span>
   );
 }
+
