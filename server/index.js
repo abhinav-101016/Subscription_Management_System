@@ -11,6 +11,7 @@ const taxRoutes = require('./routes/taxRoutes');
 const invoiceRoutes = require('./routes/invoiceRoutes');
 const billingRoutes = require('./routes/billingRoutes');
 const discountRoutes = require('./routes/discountRoutes');
+const paymentRoutes = require('./routes/paymentRoutes');
 
 const app = express();
 
@@ -35,6 +36,7 @@ app.use('/api/taxes', taxRoutes);
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/discounts', discountRoutes);
+app.use('/api/payments', paymentRoutes);
 
 // 404 Handler
 app.use((req, res, next) => {

@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { Invoice, INVOICE_STATUSES } = require('../models/Invoice');
+const Payment = require('../models/Payment');
 
 /**
  * Strict Invoice State Transition Rules:
@@ -10,6 +11,108 @@ const INVOICE_TRANSITIONS = Object.freeze({
   Confirmed: ['Paid'],
   Paid: [], // Terminal state
 });
+
+/**
+ * @desc    Fetch all invoices where status is NOT "Paid" and amount_due > 0 (Outstanding/Overdue)
+ * @route   GET /api/invoices/outstanding
+ * @access  Public / Authenticated
+ */
+const getOutstandingInvoices = async (req, res) => {
+  try {
+    const filter = {
+      status: { $ne: 'Paid' },
+      $or: [{ amount_due: { $gt: 0 } }, { amount_due: { $exists: false } }],
+    };
+
+    if (req.query.customer_id) {
+      if (!mongoose.Types.ObjectId.isValid(req.query.customer_id)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid customer_id filter format',
+        });
+      }
+      filter.customer_id = req.query.customer_id;
+    }
+
+    const invoices = await Invoice.find(filter)
+      .populate('customer_id', 'name email phone')
+      .populate('subscription_id', 'subscription_number status payment_terms')
+      .sort({ billing_period_end: 1 });
+
+    const totalOutstanding = Number(
+      invoices
+        .reduce(
+          (acc, curr) =>
+            acc + (curr.amount_due !== undefined ? Number(curr.amount_due) : Number(curr.grand_total)),
+          0
+        )
+        .toFixed(2)
+    );
+
+    return res.status(200).json({
+      success: true,
+      count: invoices.length,
+      total_outstanding_amount: totalOutstanding,
+      data: invoices,
+    });
+  } catch (error) {
+    console.error('Error fetching outstanding invoices:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error while fetching outstanding invoices',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * @desc    List all payments for a specific invoice
+ * @route   GET /api/invoices/:id/payments
+ * @access  Public / Authenticated
+ */
+const getInvoicePaymentsHandler = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid invoice ID format',
+      });
+    }
+
+    const invoice = await Invoice.findById(id);
+    if (!invoice) {
+      return res.status(404).json({
+        success: false,
+        message: 'Invoice not found',
+      });
+    }
+
+    const payments = await Payment.find({ invoice_id: id }).sort({ payment_date: -1 });
+
+    return res.status(200).json({
+      success: true,
+      invoice_summary: {
+        id: invoice._id,
+        invoice_number: invoice.invoice_number,
+        grand_total: invoice.grand_total,
+        amount_paid: invoice.amount_paid,
+        amount_due: invoice.amount_due,
+        status: invoice.status,
+      },
+      count: payments.length,
+      data: payments,
+    });
+  } catch (error) {
+    console.error('Error fetching payments for invoice:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error while fetching payments for invoice',
+      error: error.message,
+    });
+  }
+};
 
 /**
  * @desc    List all invoices with optional filters
@@ -204,7 +307,8 @@ const updateInvoiceStatus = async (req, res) => {
 module.exports = {
   INVOICE_TRANSITIONS,
   getAllInvoices,
+  getOutstandingInvoices,
+  getInvoicePaymentsHandler,
   getInvoiceById,
   updateInvoiceStatus,
 };
-
