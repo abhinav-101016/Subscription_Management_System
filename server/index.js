@@ -7,12 +7,15 @@ dotenv.config();
 
 const authRoutes = require('./routes/authRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const planRoutes = require('./routes/planRoutes');
 const templateRoutes = require('./routes/templateRoutes');
 const subscriptionRoutes = require('./routes/subscriptionRoutes');
 const taxRoutes = require('./routes/taxRoutes');
 const invoiceRoutes = require('./routes/invoiceRoutes');
 const billingRoutes = require('./routes/billingRoutes');
 const discountRoutes = require('./routes/discountRoutes');
+const paymentRoutes = require('./routes/paymentRoutes');
+const dashboardRoutes = require('./routes/dashboardRoutes');
 
 const app = express();
 
@@ -33,12 +36,15 @@ app.get('/health', (req, res) => {
 // Mount Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/plans', planRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/taxes', taxRoutes);
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/billing', billingRoutes);
 app.use('/api/discounts', discountRoutes);
+app.use('/api/payments', paymentRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 
 // 404 Handler
 app.use((req, res, next) => {

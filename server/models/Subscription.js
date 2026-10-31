@@ -102,6 +102,12 @@ const subscriptionSchema = new mongoose.Schema(
   }
 );
 
+// High-performance compound indexes for fast dashboard queries and status lookups
+subscriptionSchema.index({ status: 1, createdAt: -1 });
+subscriptionSchema.index({ status: 1, start_date: 1, expiry_date: 1 });
+subscriptionSchema.index({ status: 1, next_billing_date: 1 });
+subscriptionSchema.index({ customer_id: 1, status: 1 });
+
 const Subscription = mongoose.model('Subscription', subscriptionSchema);
 
 module.exports = {
